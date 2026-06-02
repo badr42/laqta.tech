@@ -1,0 +1,13 @@
+{
+  "name": "littlezine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-based 8-page mini-zine maker. All photo processing and PDF generation happen client-side; the server only serves static files.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

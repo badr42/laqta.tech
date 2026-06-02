@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111111" />
+  <title>Little Zine — 8-page printable zine maker</title>
+  <meta name="description" content="Make a free printable 8-page zine from your photos. Everything runs in your browser — your photos never leave your device." />
+  <link rel="stylesheet" href="styles.css" />
+  <!-- jsPDF for client-side PDF generation. Loaded from CDN so the server does no work. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◳</span>
+      <span class="brand-name">Little Zine</span>
+    </div>
+    <div class="topbar-actions">
+      <label class="paper-select">
+        <span>Paper</span>
+        <select id="paperSize">
+          <option value="letter">US Letter</option>
+          <option value="a4">A4</option>
+        </select>
+      </label>
+      <button id="downloadBtn" class="btn btn-primary" type="button">Download PDF</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="editor" aria-label="Zine editor">
+
+      <!-- FRONT COVER -->
+      <article class="card" data-section="cover">
+        <h2 class="card-title">Front cover <span class="page-tag">page 1</span></h2>
+        <div class="cover-fields">
+          <input id="coverTitle" class="txt txt-title" type="text" placeholder="Title" maxlength="40" />
+          <input id="coverSubtitle" class="txt" type="text" placeholder="Subtitle (optional)" maxlength="60" />
+          <input id="coverAuthor" class="txt" type="text" placeholder="By… (optional)" maxlength="40" />
+        </div>
+        <div class="slot slot-portrait" data-slot="cover">
+          <input type="file" accept="image/*" class="file-input" id="file-cover" />
+          <label for="file-cover" class="slot-label">
+            <span class="slot-icon">＋</span>
+            <span class="slot-text">Add cover photo (optional)</span>
+          </label>
+          <button class="slot-clear" type="button" hidden>Remove</button>
+        </div>
+      </article>
+
+      <!-- INTERIOR SPREADS injected here -->
+      <div id="spreads"></div>
+
+      <!-- BACK COVER -->
+      <article class="card" data-section="back">
+        <h2 class="card-title">Back cover <span class="page-tag">page 8</span></h2>
+        <div class="slot slot-portrait" data-slot="back">
+          <input type="file" accept="image/*" class="file-input" id="file-back" />
+          <label for="file-back" class="slot-label">
+            <span class="slot-icon">＋</span>
+            <span class="slot-text">Add back-cover photo (optional)</span>
+          </label>
+          <button class="slot-clear" type="button" hidden>Remove</button>
+        </div>
+        <textarea id="backText" class="txt txt-area" placeholder="Credits, contact, notes… (optional)" maxlength="240"></textarea>
+      </article>
+
+      <details class="howto">
+        <summary>How to print, fold &amp; cut</summary>
+        <ol>
+          <li>Download the PDF and print it on <strong>one side</strong> of a single sheet (Letter or A4), at 100% / actual size.</li>
+          <li>Fold the sheet in half the long way (top edge to bottom edge), crease, and open back up.</li>
+          <li>Fold in half the short way, then in half again to find the panels; open back up.</li>
+          <li>Fold in half the short way and cut the slit along the centre crease (only the middle two panels).</li>
+          <li>Open, fold long-ways again, and push the ends together so the cut opens into a <strong>+</strong>; collapse into a booklet and crease all folds.</li>
+        </ol>
+      </details>
+    </section>
+
+    <aside class="preview" aria-label="Booklet preview">
+      <h2 class="preview-title">Preview</h2>
+      <p class="preview-hint">Reading order — how the finished zine flips through.</p>
+      <div id="bookletPreview" class="booklet"></div>
+    </aside>
+  </main>
+
+  <!-- Hidden canvas used for splitting/resizing and PDF rendering. -->
+  <canvas id="workCanvas" hidden></canvas>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <footer class="footer">
+    <p>Your photos never leave your device — everything runs in your browser.</p>
+  </footer>
+</body>
+</html>
