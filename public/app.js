@@ -882,12 +882,27 @@ function buildFusedStage(card, sp, sIdx, pages) {
   const leftPage = buildPageDiv(sIdx, "left", pages[0], sp.a, sp, true);
   const rightPage = buildPageDiv(sIdx, "right", pages[1], sp.b, sp, true);
   stage.appendChild(leftPage); stage.appendChild(rightPage);
+
+  if (sp.fusedImg) {
+    // Single unified overlay handles pan/zoom across the full spread
+    addFusedPanOverlay(stage, sp, pages);
+
+    // Delete button for the fused image (above overlay)
+    const delBtn = document.createElement("button");
+    delBtn.type = "button"; delBtn.className = "page-delete-btn"; delBtn.textContent = "×";
+    delBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      sp.fusedImg = null; sp.fusedPanX = 0; sp.fusedPanY = 0; sp.fusedZoom = 1;
+      buildSpreads(); renderPreview(); scheduleAutoSave();
+    });
+    stage.appendChild(delBtn);
+  }
+
   card.appendChild(stage);
 
-  // Fused image upload
   const hint = document.createElement("div"); hint.className = "spread-meta";
   const hintSpan = document.createElement("span"); hintSpan.className = "spread-hint";
-  hintSpan.textContent = sp.fusedImg ? "Drag photo to pan across spread" : "Upload an image to span both pages";
+  hintSpan.textContent = sp.fusedImg ? "Drag or scroll to pan and zoom across spread" : "Upload an image to span both pages";
   hint.appendChild(hintSpan);
   card.appendChild(hint);
 
@@ -908,12 +923,84 @@ function buildFusedStage(card, sp, sIdx, pages) {
     uploadRow.appendChild(lbl); card.appendChild(uploadRow);
   }
 
-  // Fused caption
   const capRow = document.createElement("div"); capRow.className = "captions";
   const capInput = document.createElement("input"); capInput.type = "text"; capInput.className = "txt";
   capInput.placeholder = "Caption (optional)"; capInput.value = sp.fusedCap; capInput.maxLength = 100;
   capInput.addEventListener("input", () => { sp.fusedCap = capInput.value; renderPreview(); scheduleAutoSave(); });
   capRow.appendChild(capInput); card.appendChild(capRow);
+}
+
+function addFusedPanOverlay(stage, sp, pages) {
+  const overlay = document.createElement("div");
+  overlay.className = "fused-pan-overlay";
+  stage.appendChild(overlay);
+
+  let dragging = false, sx = 0, sy = 0, spx = 0, spy = 0;
+  let lastPinchDist = null;
+
+  function redrawBoth() {
+    const lc = stage.querySelector('[data-side="left"] .pg-canvas');
+    const rc = stage.querySelector('[data-side="right"] .pg-canvas');
+    if (lc) drawToThumb(lc, pages[0]);
+    if (rc) drawToThumb(rc, pages[1]);
+    renderPreview();
+    scheduleAutoSave();
+  }
+
+  overlay.addEventListener("pointerdown", e => {
+    if (!sp.fusedImg || e.isPrimary === false) return;
+    e.preventDefault(); dragging = true;
+    sx = e.clientX; sy = e.clientY;
+    spx = sp.fusedPanX; spy = sp.fusedPanY;
+    overlay.setPointerCapture(e.pointerId);
+    overlay.style.cursor = "grabbing";
+  });
+
+  overlay.addEventListener("pointermove", e => {
+    if (!dragging || !sp.fusedImg) return;
+    const img = sp.fusedImg;
+    const rect = stage.getBoundingClientRect();
+    const W = rect.width, H = rect.height;
+    const zoom = sp.fusedZoom || 1;
+    const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight) * zoom;
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+    const ox = Math.max(1, (dw - W) / 2), oy = Math.max(1, (dh - H) / 2);
+    sp.fusedPanX = Math.max(-1, Math.min(1, spx + (e.clientX - sx) / ox));
+    sp.fusedPanY = Math.max(-1, Math.min(1, spy + (e.clientY - sy) / oy));
+    redrawBoth();
+  });
+
+  const endDrag = () => { dragging = false; overlay.style.cursor = "grab"; };
+  overlay.addEventListener("pointerup", endDrag);
+  overlay.addEventListener("pointercancel", endDrag);
+
+  overlay.addEventListener("wheel", e => {
+    if (!sp.fusedImg) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    sp.fusedZoom = Math.max(0.25, Math.min(4, (sp.fusedZoom || 1) * factor));
+    redrawBoth();
+  }, { passive: false });
+
+  overlay.addEventListener("touchmove", e => {
+    if (e.touches.length !== 2) return;
+    e.preventDefault();
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (lastPinchDist !== null) {
+      sp.fusedZoom = Math.max(0.25, Math.min(4, (sp.fusedZoom || 1) * (dist / lastPinchDist)));
+      redrawBoth();
+    }
+    lastPinchDist = dist;
+  }, { passive: false });
+  overlay.addEventListener("touchend", () => { lastPinchDist = null; });
+  overlay.addEventListener("touchcancel", () => { lastPinchDist = null; });
+
+  addDropZone(overlay, async f => {
+    try { sp.fusedImg = await fileToImage(f); } catch(err) { showToast("Not a readable image."); return; }
+    buildSpreads(); renderPreview(); scheduleAutoSave();
+  });
 }
 
 function buildSplitStage(card, sp, sIdx, pages) {
@@ -964,12 +1051,26 @@ function buildPageDiv(sIdx, side, pageId, pageData, sp, fused) {
 
   div.appendChild(fileInput); div.appendChild(canvas); div.appendChild(lbl);
 
+  // Delete button — only for non-fused pages (fused delete is handled at stage level)
+  let deleteBtn = null;
+  if (!fused) {
+    deleteBtn = document.createElement("button");
+    deleteBtn.type = "button"; deleteBtn.className = "page-delete-btn"; deleteBtn.textContent = "×";
+    deleteBtn.hidden = true;
+    deleteBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      pageData.img = null; pageData.panX = 0; pageData.panY = 0; pageData.zoom = 1;
+      buildSpreads(); renderPreview(); scheduleAutoSave();
+    });
+    div.appendChild(deleteBtn);
+  }
+
   function refresh() {
     const hasImg = fused ? !!sp.fusedImg : !!pageData.img;
     div.classList.toggle("has-image", hasImg);
+    if (deleteBtn) deleteBtn.hidden = !hasImg;
     if (hasImg) {
       canvas.hidden = false;
-      // Use rAF so the canvas is in the DOM and laid out before we measure it.
       requestAnimationFrame(() => drawToThumb(canvas, pageId));
     } else {
       canvas.hidden = true;
@@ -1004,18 +1105,13 @@ function buildPageDiv(sIdx, side, pageId, pageData, sp, fused) {
     renderPreview(); scheduleAutoSave();
   });
 
+  // Pan/zoom for non-fused pages; fused pan is handled by the unified overlay in buildFusedStage
   if (!fused) {
     addPanDrag(canvas,
       () => pageData.img,
       () => [pageData.panX, pageData.panY],
       (nx, ny) => { pageData.panX = nx; pageData.panY = ny; },
       { pageId, getZoom: () => pageData.zoom || 1, setZoom: z => { pageData.zoom = z; } });
-  } else {
-    addPanDrag(canvas,
-      () => sp.fusedImg,
-      () => [sp.fusedPanX, sp.fusedPanY],
-      (nx, ny) => { sp.fusedPanX = nx; sp.fusedPanY = ny; },
-      { pageId, getZoom: () => sp.fusedZoom || 1, setZoom: z => { sp.fusedZoom = z; } });
   }
 
   refresh();
