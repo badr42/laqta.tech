@@ -1,45 +1,53 @@
 "use strict";
 
 /* ============================================================
-   Little Zine — all processing happens here, in the browser.
-   8 pages from one single-sided sheet:
-     page 1 = front cover
-     pages 2-3, 4-5, 6-7 = three interior spreads
-     page 8 = back cover
-   A landscape photo dropped on a spread is auto-split across
-   its two facing pages.
+   laqta.tech Zine Maker
    ============================================================ */
 
-const SPREADS = [
-  { id: 0, pages: [2, 3] },
-  { id: 1, pages: [4, 5] },
-  { id: 2, pages: [6, 7] },
-];
-
-// Treat anything noticeably wider than tall as "landscape".
+const SPREAD_COUNT = 3;
 const LANDSCAPE_RATIO = 1.15;
+const SPREAD_PAGES = [[2,3],[4,5],[6,7]];
+const FONTS = {
+  system: { label: "Sans-serif", css: "-apple-system, Helvetica, Arial, sans-serif" },
+  serif:  { label: "Serif",      css: "Georgia, 'Times New Roman', serif" },
+  mono:   { label: "Mono",       css: "'Courier New', Courier, monospace" },
+};
+
+let spreadOrder = [0, 1, 2];
+
+/* ---------- state factories ---------- */
+function freshPage() {
+  return { img: null, cap: "", fit: "cover", panX: 0, panY: 0, zoom: 1 };
+}
+function freshSpread() {
+  return {
+    fused: false,
+    fusedImg: null, fusedPanX: 0, fusedPanY: 0, fusedCap: "", fusedZoom: 1,
+    a: freshPage(), b: freshPage(),
+  };
+}
+function freshCover() {
+  return {
+    title: "", subtitle: "", author: "",
+    img: null, fit: "cover", panX: 0, panY: 0, zoom: 1,
+    bgColor: "",
+    textAlign: "center", titleSize: 1,
+    overlay: false, overlayColor: "#000000", overlayOpacity: 0.45,
+    fontColor: "", font: "system",
+  };
+}
 
 const state = {
   paper: "letter",
-  cover: { title: "", subtitle: "", author: "", img: null },
-  back: { text: "", img: null },
-  // each spread: split flag, a spanning source image, or two portrait pages
-  spreads: SPREADS.map(() => ({
-    split: true,
-    source: null, // HTMLImageElement when a wide photo spans the spread
-    wideCap: "",
-    a: { img: null, cap: "" }, // left page
-    b: { img: null, cap: "" }, // right page
-  })),
+  cover: freshCover(),
+  back: Object.assign(freshCover(), { notes: "", qrLink: "", qrImg: null }),
+  spreads: Array.from({ length: SPREAD_COUNT }, freshSpread),
 };
 
-/* ---------- paper geometry (landscape sheet) ---------- */
+/* ---------- paper ---------- */
 function paperInches() {
-  return state.paper === "a4"
-    ? { w: 11.69, h: 8.27 }
-    : { w: 11.0, h: 8.5 };
+  return state.paper === "a4" ? { w: 11.69, h: 8.27 } : { w: 11.0, h: 8.5 };
 }
-// page (panel) aspect ratio = (sheetW/4) : (sheetH/2)
 function pageAspect() {
   const p = paperInches();
   return (p.w / 4) / (p.h / 2);
@@ -48,67 +56,70 @@ function pageAspect() {
 /* ---------- image helpers ---------- */
 function fileToImage(file) {
   return new Promise((resolve, reject) => {
-    if (!file || !file.type.startsWith("image/")) {
-      reject(new Error("Not an image"));
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Could not read image"));
+    if (!file || !file.type.startsWith("image/")) { reject(new Error("Not an image")); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img._dataUrl = e.target.result;
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Could not decode image"));
+      img.src = e.target.result;
     };
-    img.src = url;
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+}
+function imageFromDataURL(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img._dataUrl = dataUrl;
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
   });
 }
 function isLandscape(img) {
   return img.naturalWidth >= img.naturalHeight * LANDSCAPE_RATIO;
 }
 
-// cover-fit a whole image into a single page rect
-function drawCover(ctx, img, x, y, w, h) {
-  const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-  const dw = img.naturalWidth * scale;
-  const dh = img.naturalHeight * scale;
+function drawCover(ctx, img, x, y, w, h, fit = "cover", panX = 0, panY = 0, zoom = 1) {
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+  if (fit === "contain") {
+    const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight) * zoom;
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+    ctx.fillStyle = "#111111";
+    ctx.fillRect(x, y, w, h);
+    ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  } else {
+    const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight) * zoom;
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+    const ox = Math.max(0, (dw - w) / 2), oy = Math.max(0, (dh - h) / 2);
+    ctx.drawImage(img, x + (w - dw) / 2 + panX * ox, y + (h - dh) / 2 + panY * oy, dw, dh);
+  }
   ctx.restore();
 }
 
-// cover-fit a wide image across a 2-page spread, drawing only one half
-function drawSpanHalf(ctx, img, x, y, u, v, side) {
+function drawSpanHalf(ctx, img, x, y, u, v, side, panX = 0, panY = 0, zoom = 1) {
   const W = 2 * u, H = v;
-  const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight);
-  const dw = img.naturalWidth * scale;
-  const dh = img.naturalHeight * scale;
-  const ox = (W - dw) / 2;
-  const oy = (H - dh) / 2;
+  const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight) * zoom;
+  const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+  const ox = Math.max(0, (dw - W) / 2), oy = Math.max(0, (dh - H) / 2);
   const shift = side === "right" ? -u : 0;
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, u, v);
-  ctx.clip();
-  ctx.drawImage(img, x + ox + shift, y + oy, dw, dh);
+  ctx.beginPath(); ctx.rect(x, y, u, v); ctx.clip();
+  ctx.drawImage(img, x + (W - dw) / 2 + shift + panX * ox, y + (H - dh) / 2 + panY * oy, dw, dh);
   ctx.restore();
 }
 
 /* ---------- text helpers ---------- */
 function wrapText(ctx, text, maxWidth) {
   const words = String(text).split(/\s+/).filter(Boolean);
-  const lines = [];
-  let line = "";
+  const lines = []; let line = "";
   for (const word of words) {
     const test = line ? line + " " + word : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
+    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = word; }
+    else line = test;
   }
   if (line) lines.push(line);
   return lines;
@@ -122,372 +133,933 @@ function caption(ctx, text, x, y, w, h) {
   const boxH = pad + lines.length * fs * 1.25 + pad * 0.5;
   ctx.fillStyle = "rgba(0,0,0,0.55)";
   ctx.fillRect(x, y + h - boxH, w, boxH);
-  ctx.fillStyle = "#fff";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  lines.forEach((ln, i) => {
-    ctx.fillText(ln, x + pad, y + h - boxH + pad + i * fs * 1.25);
-  });
+  ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+  lines.forEach((ln, i) => ctx.fillText(ln, x + pad, y + h - boxH + pad + i * fs * 1.25));
+}
+function drawCenteredDown(ctx, text, ax, top, maxW, fs) {
+  const lines = wrapText(ctx, text, maxW);
+  lines.forEach((ln, i) => ctx.fillText(ln, ax, top + i * fs * 1.18));
+  return top + lines.length * fs * 1.18;
+}
+function drawCenteredUp(ctx, text, ax, bottom, maxW, fs) {
+  const lines = wrapText(ctx, text, maxW);
+  const lh = fs * 1.12;
+  lines.forEach((ln, i) => ctx.fillText(ln, ax, bottom - (lines.length - 1 - i) * lh));
+  return lines.length * lh;
+}
+
+/* ---------- overlay ---------- */
+function drawOverlay(ctx, x, y, w, h, color, opacity) {
+  ctx.save(); ctx.globalAlpha = opacity; ctx.fillStyle = color;
+  ctx.fillRect(x, y, w, h); ctx.restore();
+}
+
+/* ---------- placeholder ---------- */
+function drawPlaceholder(ctx, x, y, w, h) {
+  ctx.save();
+  ctx.fillStyle = "#e0e0dc"; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#a1a1aa"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = `500 ${Math.max(8, Math.round(h * 0.07))}px -apple-system, Helvetica, Arial, sans-serif`;
+  ctx.fillText("Add photo here", x + w / 2, y + h / 2);
+  ctx.restore();
+}
+
+/* ---------- cover/back text ---------- */
+function getAnchor(align, x, w, pad) {
+  if (align === "left") return x + pad;
+  if (align === "right") return x + w - pad;
+  return x + w / 2;
+}
+
+function drawCoverText(ctx, x, y, w, h, overImage, c) {
+  const { title, subtitle, author, textAlign, titleSize, fontColor, font } = c;
+  if (!title && !subtitle && !author) return;
+  const fontCSS = (FONTS[font] || FONTS.system).css;
+  const pad = w * 0.08, maxW = w - pad * 2;
+  const align = textAlign || "center";
+  ctx.textAlign = align;
+  const ax = getAnchor(align, x, w, pad);
+
+  if (overImage && !c.overlay) {
+    const grad = ctx.createLinearGradient(0, y + h * 0.45, 0, y + h);
+    grad.addColorStop(0, "rgba(0,0,0,0)"); grad.addColorStop(1, "rgba(0,0,0,0.75)");
+    ctx.fillStyle = grad; ctx.fillRect(x, y + h * 0.45, w, h * 0.55);
+  }
+  let inkAuto = overImage ? "#ffffff" : "#18181b";
+  let subAuto = overImage ? "rgba(255,255,255,0.85)" : "#52525b";
+  if (!overImage && c.bgColor) {
+    const hex = c.bgColor.replace("#", "");
+    const lum = (parseInt(hex.slice(0,2),16)*299 + parseInt(hex.slice(2,4),16)*587 + parseInt(hex.slice(4,6),16)*114) / 1000;
+    inkAuto = lum < 140 ? "#ffffff" : "#18181b";
+    subAuto = lum < 140 ? "rgba(255,255,255,0.8)" : "#52525b";
+  }
+  const ink = fontColor || inkAuto, sub = fontColor || subAuto;
+
+  if (overImage) {
+    let cy = y + h - h * 0.07;
+    if (author) {
+      ctx.fillStyle = sub;
+      ctx.font = `500 ${Math.round(h * 0.032)}px ${fontCSS}`;
+      ctx.textBaseline = "bottom"; ctx.fillText(author, ax, cy); cy -= h * 0.05;
+    }
+    if (subtitle) {
+      ctx.fillStyle = sub;
+      const fs = Math.round(h * 0.034);
+      ctx.font = `500 ${fs}px ${fontCSS}`; ctx.textBaseline = "bottom";
+      cy -= drawCenteredUp(ctx, subtitle, ax, cy, maxW, fs) + h * 0.01;
+    }
+    if (title) {
+      ctx.fillStyle = ink;
+      const fs = Math.round(h * 0.082 * (titleSize || 1));
+      ctx.font = `700 ${fs}px ${fontCSS}`; ctx.textBaseline = "bottom";
+      drawCenteredUp(ctx, title, ax, cy, maxW, fs);
+    }
+  } else {
+    // Vertically center the title+subtitle block
+    const titleFs = title ? Math.round(h * 0.1 * (titleSize || 1)) : 0;
+    const subFs = subtitle ? Math.round(h * 0.042) : 0;
+    const estimatedH = (title ? titleFs * 1.4 : 0) + (subtitle ? subFs * 1.4 : 0);
+    let cy = Math.max(y + h * 0.12, y + h / 2 - estimatedH / 2);
+    if (title) {
+      ctx.fillStyle = ink;
+      ctx.font = `700 ${titleFs}px ${fontCSS}`; ctx.textBaseline = "top";
+      cy = drawCenteredDown(ctx, title, ax, cy, maxW, titleFs) + h * 0.02;
+    }
+    if (subtitle) {
+      ctx.fillStyle = sub;
+      ctx.font = `500 ${subFs}px ${fontCSS}`; ctx.textBaseline = "top";
+      cy = drawCenteredDown(ctx, subtitle, ax, cy, maxW, subFs) + h * 0.02;
+    }
+    if (author) {
+      ctx.fillStyle = sub;
+      ctx.font = `500 ${Math.round(h * 0.034)}px ${fontCSS}`;
+      ctx.textBaseline = "bottom"; ctx.fillText(author, ax, y + h - h * 0.06);
+    }
+  }
+}
+
+function drawBackNotes(ctx, x, y, w, h, overImage, notes) {
+  if (!notes) return;
+  // When a QR code is present, restrict text to the left portion to avoid overlap
+  const hasQR = !!state.back.qrImg;
+  const textW = hasQR ? w * 0.62 : w;
+  const pad = w * 0.1, fs = Math.round(h * 0.028);
+  ctx.font = `400 ${fs}px -apple-system, Helvetica, Arial, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const lines = wrapText(ctx, notes, textW - pad * 2).slice(0, 4);
+  const blockH = lines.length * fs * 1.4;
+  // Position in lower-center of page, well above the QR zone (~85% down)
+  const top = y + h * 0.62 - blockH / 2;
+  const cx = x + textW / 2;
+  if (overImage) {
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(x, top - h * 0.02, textW, blockH + h * 0.04);
+    ctx.fillStyle = "#fff";
+  } else {
+    ctx.fillStyle = "#71717a";
+  }
+  lines.forEach((ln, i) => ctx.fillText(ln, cx, top + i * fs * 1.4));
+}
+
+function drawBackQR(ctx, x, y, w, h) {
+  const img = state.back.qrImg;
+  if (!img) return;
+  const size = w * 0.3, pad = w * 0.04, bp = pad * 0.4;
+  const qx = x + w - size - pad, qy = y + h - size - pad;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(qx - bp, qy - bp, size + bp * 2, size + bp * 2);
+  ctx.drawImage(img, qx, qy, size, size);
 }
 
 /* ---------- page model ---------- */
 function pageModel(pageId) {
   if (pageId === 1) return { type: "cover" };
   if (pageId === 8) return { type: "back" };
-  const sIndex = Math.floor((pageId - 2) / 2);
+  const pos = Math.floor((pageId - 2) / 2);
   const side = (pageId - 2) % 2 === 0 ? "left" : "right";
-  return { type: "spread", spread: state.spreads[sIndex], side };
+  return { type: "spread", spread: state.spreads[spreadOrder[pos]], side };
 }
 
-/* ---------- the single renderer (used by preview + PDF) ---------- */
-function renderPage(ctx, x, y, w, h, pageId) {
-  // page background
-  ctx.fillStyle = "#fafaf7";
-  ctx.fillRect(x, y, w, h);
+/* ---------- page state (lazy — safe across spreadOrder changes) ---------- */
+function pageState(pageId) {
+  if (pageId === 1) {
+    const c = state.cover;
+    return {
+      getImg: () => c.img, getPan: () => [c.panX, c.panY], setPan: (nx, ny) => { c.panX = nx; c.panY = ny; },
+      getZoom: () => c.zoom || 1, setZoom: z => { c.zoom = z; },
+    };
+  }
+  if (pageId === 8) {
+    const b = state.back;
+    return {
+      getImg: () => b.img, getPan: () => [b.panX, b.panY], setPan: (nx, ny) => { b.panX = nx; b.panY = ny; },
+      getZoom: () => b.zoom || 1, setZoom: z => { b.zoom = z; },
+    };
+  }
+  return {
+    getImg: () => { const m = pageModel(pageId); const sp = m.spread; return sp.fused ? sp.fusedImg : (m.side === "left" ? sp.a : sp.b).img; },
+    getPan: () => { const m = pageModel(pageId); const sp = m.spread; return sp.fused ? [sp.fusedPanX, sp.fusedPanY] : (m.side === "left" ? [sp.a.panX, sp.a.panY] : [sp.b.panX, sp.b.panY]); },
+    setPan: (nx, ny) => { const m = pageModel(pageId); const sp = m.spread; if (sp.fused) { sp.fusedPanX = nx; sp.fusedPanY = ny; } else { const pg = m.side === "left" ? sp.a : sp.b; pg.panX = nx; pg.panY = ny; } },
+    getZoom: () => { const m = pageModel(pageId); const sp = m.spread; return sp.fused ? (sp.fusedZoom || 1) : ((m.side === "left" ? sp.a : sp.b).zoom || 1); },
+    setZoom: z => { const m = pageModel(pageId); const sp = m.spread; if (sp.fused) { sp.fusedZoom = z; } else { (m.side === "left" ? sp.a : sp.b).zoom = z; } },
+  };
+}
 
+/* ---------- renderer ---------- */
+function renderPage(ctx, x, y, w, h, pageId, showPlaceholder = false) {
+  ctx.fillStyle = "#fafaf7"; ctx.fillRect(x, y, w, h);
   const m = pageModel(pageId);
 
   if (m.type === "cover") {
-    if (state.cover.img) drawCover(ctx, state.cover.img, x, y, w, h);
-    drawCoverText(ctx, x, y, w, h, !!state.cover.img);
+    const c = state.cover;
+    if (c.bgColor) { ctx.fillStyle = c.bgColor; ctx.fillRect(x, y, w, h); }
+    if (c.img) { drawCover(ctx, c.img, x, y, w, h, c.fit, c.panX, c.panY, c.zoom || 1); if (c.overlay) drawOverlay(ctx, x, y, w, h, c.overlayColor, c.overlayOpacity); }
+    else if (!c.bgColor && showPlaceholder) drawPlaceholder(ctx, x, y, w, h);
+    drawCoverText(ctx, x, y, w, h, !!c.img, c);
     return;
   }
-
   if (m.type === "back") {
-    if (state.back.img) drawCover(ctx, state.back.img, x, y, w, h);
-    drawBackText(ctx, x, y, w, h, !!state.back.img);
+    const b = state.back;
+    if (b.bgColor) { ctx.fillStyle = b.bgColor; ctx.fillRect(x, y, w, h); }
+    if (b.img) { drawCover(ctx, b.img, x, y, w, h, b.fit, b.panX, b.panY, b.zoom || 1); if (b.overlay) drawOverlay(ctx, x, y, w, h, b.overlayColor, b.overlayOpacity); }
+    else if (!b.bgColor && showPlaceholder) drawPlaceholder(ctx, x, y, w, h);
+    drawCoverText(ctx, x, y, w, h, !!b.img, b);
+    drawBackNotes(ctx, x, y, w, h, !!b.img, b.notes);
+    drawBackQR(ctx, x, y, w, h);
     return;
   }
-
-  // spread page
   const sp = m.spread;
-  if (sp.source && sp.split) {
-    drawSpanHalf(ctx, sp.source, x, y, w, h, m.side);
-    if (m.side === "right") caption(ctx, sp.wideCap, x, y, w, h);
+  if (sp.fused && sp.fusedImg) {
+    drawSpanHalf(ctx, sp.fusedImg, x, y, w, h, m.side, sp.fusedPanX, sp.fusedPanY, sp.fusedZoom || 1);
+    if (m.side === "right") caption(ctx, sp.fusedCap, x, y, w, h);
+  } else if (sp.fused && !sp.fusedImg && showPlaceholder) {
+    drawPlaceholder(ctx, x, y, w, h);
   } else {
     const page = m.side === "left" ? sp.a : sp.b;
     if (page.img) {
-      drawCover(ctx, page.img, x, y, w, h);
+      drawCover(ctx, page.img, x, y, w, h, page.fit, page.panX, page.panY, page.zoom || 1);
       caption(ctx, page.cap, x, y, w, h);
+    } else if (showPlaceholder) {
+      drawPlaceholder(ctx, x, y, w, h);
     } else {
-      // empty page placeholder (only visible in PDF if left blank)
-      ctx.fillStyle = "#ececea";
-      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = "#ececea"; ctx.fillRect(x, y, w, h);
     }
   }
 }
 
-function drawCoverText(ctx, x, y, w, h, overImage) {
-  const { title, subtitle, author } = state.cover;
-  if (overImage && (title || subtitle || author)) {
-    const grad = ctx.createLinearGradient(0, y + h * 0.45, 0, y + h);
-    grad.addColorStop(0, "rgba(0,0,0,0)");
-    grad.addColorStop(1, "rgba(0,0,0,0.75)");
-    ctx.fillStyle = grad;
-    ctx.fillRect(x, y + h * 0.45, w, h * 0.55);
-  }
-  ctx.textAlign = "center";
-  const cx = x + w / 2;
-  const ink = overImage ? "#ffffff" : "#18181b";
-  const sub = overImage ? "rgba(255,255,255,0.85)" : "#52525b";
-  const pad = w * 0.08;
-
-  if (overImage) {
-    // anchored near the bottom over the gradient
-    let cy = y + h - h * 0.07;
-    if (author) {
-      ctx.fillStyle = sub;
-      ctx.font = `500 ${Math.round(h * 0.032)}px -apple-system, Helvetica, Arial, sans-serif`;
-      ctx.textBaseline = "bottom";
-      ctx.fillText(author, cx, cy);
-      cy -= h * 0.05;
-    }
-    if (subtitle) {
-      ctx.fillStyle = sub;
-      ctx.font = `500 ${Math.round(h * 0.034)}px -apple-system, Helvetica, Arial, sans-serif`;
-      ctx.textBaseline = "bottom";
-      drawCentered(ctx, subtitle, cx, cy, w - pad * 2, h * 0.04);
-      cy -= h * 0.055;
-    }
-    if (title) {
-      ctx.fillStyle = ink;
-      const fs = Math.round(h * 0.082);
-      ctx.font = `700 ${fs}px -apple-system, Helvetica, Arial, sans-serif`;
-      ctx.textBaseline = "bottom";
-      cy -= drawCenteredUp(ctx, title, cx, cy, w - pad * 2, fs);
-    }
-  } else {
-    // centered on a blank cover
-    let cy = y + h * 0.42;
-    if (title) {
-      ctx.fillStyle = ink;
-      const fs = Math.round(h * 0.085);
-      ctx.font = `700 ${fs}px -apple-system, Helvetica, Arial, sans-serif`;
-      ctx.textBaseline = "top";
-      cy = drawCentered(ctx, title, cx, cy, w - pad * 2, fs) + h * 0.01;
-    }
-    if (subtitle) {
-      ctx.fillStyle = sub;
-      const fs = Math.round(h * 0.036);
-      ctx.font = `500 ${fs}px -apple-system, Helvetica, Arial, sans-serif`;
-      ctx.textBaseline = "top";
-      cy = drawCentered(ctx, subtitle, cx, cy, w - pad * 2, fs) + h * 0.02;
-    }
-    if (author) {
-      ctx.fillStyle = sub;
-      ctx.font = `500 ${Math.round(h * 0.032)}px -apple-system, Helvetica, Arial, sans-serif`;
-      ctx.textBaseline = "bottom";
-      ctx.fillText(author, cx, y + h - h * 0.06);
-    }
-  }
-}
-
-// draw wrapped centered text downward; returns y after last line
-function drawCentered(ctx, text, cx, top, maxW, fs) {
-  const lines = wrapText(ctx, text, maxW);
-  lines.forEach((ln, i) => ctx.fillText(ln, cx, top + i * fs * 1.18));
-  return top + lines.length * fs * 1.18;
-}
-// draw wrapped centered text anchored at a bottom baseline; returns height used
-function drawCenteredUp(ctx, text, cx, bottom, maxW, fs) {
-  const lines = wrapText(ctx, text, maxW);
-  const lh = fs * 1.12;
-  lines.forEach((ln, i) => {
-    const yy = bottom - (lines.length - 1 - i) * lh;
-    ctx.fillText(ln, cx, yy);
-  });
-  return lines.length * lh;
-}
-
-function drawBackText(ctx, x, y, w, h, overImage) {
-  const text = state.back.text;
-  if (!text) return;
-  const pad = w * 0.1;
-  const fs = Math.round(h * 0.03);
-  ctx.font = `500 ${fs}px -apple-system, Helvetica, Arial, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  const lines = wrapText(ctx, text, w - pad * 2).slice(0, 8);
-  const blockH = lines.length * fs * 1.35;
-  let top = y + h - blockH - h * 0.08;
-  if (overImage) {
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(x, top - h * 0.03, w, blockH + h * 0.06);
-    ctx.fillStyle = "#fff";
-  } else {
-    top = y + h * 0.4;
-    ctx.fillStyle = "#52525b";
-  }
-  lines.forEach((ln, i) => ctx.fillText(ln, x + w / 2, top + i * fs * 1.35));
-}
-
-/* ============================================================
-   UI: build spreads, wire inputs
-   ============================================================ */
-const spreadsRoot = document.getElementById("spreads");
-
-function buildSpreads() {
-  SPREADS.forEach((s) => {
-    const card = document.createElement("article");
-    card.className = "spread-card";
-    card.innerHTML = `
-      <div class="spread-head">
-        <h2>Spread <span class="page-tag">pages ${s.pages[0]}–${s.pages[1]}</span></h2>
-        <button class="spread-clear" type="button" data-spread="${s.id}" hidden>Clear</button>
-      </div>
-      <div class="spread-stage" data-spread="${s.id}">
-        <div class="spread-page" data-side="left">
-          <input type="file" accept="image/*" class="file-input" data-spread="${s.id}" data-side="left" />
-          <canvas class="pg-canvas" hidden></canvas>
-          <label class="slot-label"><span class="slot-icon">＋</span><span class="slot-text">Left page</span></label>
-        </div>
-        <div class="spread-page" data-side="right">
-          <input type="file" accept="image/*" class="file-input" data-spread="${s.id}" data-side="right" />
-          <canvas class="pg-canvas" hidden></canvas>
-          <label class="slot-label"><span class="slot-icon">＋</span><span class="slot-text">Right page</span></label>
-        </div>
-      </div>
-      <div class="spread-meta">
-        <span class="spread-hint">Drop a wide (landscape) photo to fill both pages.</span>
-      </div>
-      <div class="captions">
-        <input class="txt" type="text" placeholder="Left caption" data-cap="left" data-spread="${s.id}" maxlength="80" />
-        <input class="txt" type="text" placeholder="Right caption" data-cap="right" data-spread="${s.id}" maxlength="80" />
-      </div>
-    `;
-    spreadsRoot.appendChild(card);
-  });
-}
-
-/* ---------- spread upload handling ---------- */
-async function handleSpreadFile(spreadId, side, file) {
-  let img;
-  try {
-    img = await fileToImage(file);
-  } catch (e) {
-    showToast("That file isn't a readable image.");
-    return;
-  }
-  const sp = state.spreads[spreadId];
-  if (isLandscape(img) && sp.split) {
-    // wide photo → spans both pages, auto-split
-    sp.source = img;
-    sp.a.img = null;
-    sp.b.img = null;
-    showToast("Landscape photo split across both pages.");
-  } else {
-    // portrait/square → fills just this page
-    sp.source = null;
-    if (side === "left") sp.a.img = img;
-    else sp.b.img = img;
-  }
-  refreshSpread(spreadId);
-  renderPreview();
-}
-
-function clearSpread(spreadId) {
-  const sp = state.spreads[spreadId];
-  sp.source = null;
-  sp.a.img = null;
-  sp.b.img = null;
-  refreshSpread(spreadId);
-  renderPreview();
-}
-
-function refreshSpread(spreadId) {
-  const sp = state.spreads[spreadId];
-  const stage = spreadsRoot.querySelector(`.spread-stage[data-spread="${spreadId}"]`);
-  const clearBtn = spreadsRoot.querySelector(`.spread-clear[data-spread="${spreadId}"]`);
-  const spanning = !!(sp.source && sp.split);
-  stage.classList.toggle("is-landscape", spanning);
-
-  const hasAny = spanning || sp.a.img || sp.b.img;
-  clearBtn.hidden = !hasAny;
-
-  const captionRow = stage.parentElement.querySelector(".captions");
-  captionRow.classList.toggle("single", spanning);
-
-  ["left", "right"].forEach((side) => {
-    const pageEl = stage.querySelector(`.spread-page[data-side="${side}"]`);
-    const canvas = pageEl.querySelector(".pg-canvas");
-    const input = pageEl.querySelector(".file-input");
-    const pageId = SPREADS[spreadId].pages[side === "left" ? 0 : 1];
-
-    const filled = spanning || (side === "left" ? sp.a.img : sp.b.img);
-    pageEl.classList.toggle("has-image", !!filled);
-    // when spanning, the right input is redundant; keep left input active to replace
-    input.disabled = spanning && side === "right";
-
-    if (filled) {
-      drawToThumb(canvas, pageId);
-      canvas.hidden = false;
-    } else {
-      canvas.hidden = true;
-    }
-  });
-
-  // hide right caption when spanning
-  const rightCap = stage.parentElement.querySelector('input[data-cap="right"]');
-  const leftCap = stage.parentElement.querySelector('input[data-cap="left"]');
-  if (spanning) {
-    rightCap.style.display = "none";
-    leftCap.placeholder = "Caption";
-  } else {
-    rightCap.style.display = "";
-    leftCap.placeholder = "Left caption";
-  }
-}
-
-/* draw a page into a thumbnail canvas sized to its display box */
-function drawToThumb(canvas, pageId) {
+/* ---------- thumbnail ---------- */
+function drawToThumb(canvas, pageId, showPlaceholder = false) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // getBoundingClientRect forces layout so we always get current dimensions.
+  // If the canvas hasn't been laid out yet (rect.width===0) use a safe fallback.
   const rect = canvas.getBoundingClientRect();
-  let cssW = rect.width, cssH = rect.height;
-  if (!cssW || !cssH) {
-    // fall back to page aspect at a sensible size
-    cssW = 300;
-    cssH = cssW / pageAspect();
-  }
-  canvas.width = Math.round(cssW * dpr);
-  canvas.height = Math.round(cssH * dpr);
+  const cssW = rect.width > 0 ? rect.width : (canvas.parentElement?.getBoundingClientRect().width / 2 || 260);
+  const cssH = rect.height > 0 ? rect.height : cssW / pageAspect();
+  canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  renderPage(ctx, 0, 0, cssW, cssH, pageId);
+  renderPage(ctx, 0, 0, cssW, cssH, pageId, showPlaceholder);
+}
+
+/* ---------- QR ---------- */
+async function generateQR(url) {
+  if (!url.trim()) {
+    state.back.qrImg = null; refreshSimpleSlot("back"); renderPreview(); return;
+  }
+  if (!window.QRCode) { showToast("QR library not loaded yet."); return; }
+  const size = 512;
+  const div = document.createElement("div");
+  div.style.cssText = `position:absolute;left:-9999px;top:-9999px;width:${size}px;height:${size}px;`;
+  document.body.appendChild(div);
+  try {
+    new QRCode(div, { text: url.trim(), width: size, height: size,
+      colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M });
+    const cvs = div.querySelector("canvas");
+    if (!cvs) { state.back.qrImg = null; return; }
+    const img = new Image(); img._dataUrl = cvs.toDataURL();
+    await new Promise(r => { img.onload = r; img.src = img._dataUrl; });
+    state.back.qrImg = img;
+  } catch(e) {
+    showToast("Couldn't generate QR — check the link."); state.back.qrImg = null;
+  } finally { document.body.removeChild(div); }
+  refreshSimpleSlot("back"); renderPreview();
 }
 
 /* ============================================================
-   Cover / back uploads
+   Auto-save
+   ============================================================ */
+const SAVE_KEY = "laqta-zine-v2";
+let saveTimer = null;
+
+function serializableImg(img) { return img && img._dataUrl ? img._dataUrl : null; }
+
+function saveState() {
+  try {
+    const s = {
+      paper: state.paper, spreadOrder,
+      cover: {
+        title: state.cover.title, subtitle: state.cover.subtitle, author: state.cover.author,
+        fit: state.cover.fit, panX: state.cover.panX, panY: state.cover.panY, zoom: state.cover.zoom,
+        bgColor: state.cover.bgColor,
+        textAlign: state.cover.textAlign, titleSize: state.cover.titleSize,
+        overlay: state.cover.overlay, overlayColor: state.cover.overlayColor, overlayOpacity: state.cover.overlayOpacity,
+        fontColor: state.cover.fontColor, font: state.cover.font,
+        imgData: serializableImg(state.cover.img),
+      },
+      back: {
+        title: state.back.title, subtitle: state.back.subtitle, author: state.back.author,
+        notes: state.back.notes, qrLink: state.back.qrLink,
+        fit: state.back.fit, panX: state.back.panX, panY: state.back.panY, zoom: state.back.zoom,
+        bgColor: state.back.bgColor,
+        textAlign: state.back.textAlign, titleSize: state.back.titleSize,
+        overlay: state.back.overlay, overlayColor: state.back.overlayColor, overlayOpacity: state.back.overlayOpacity,
+        fontColor: state.back.fontColor, font: state.back.font,
+        imgData: serializableImg(state.back.img),
+        qrImgData: serializableImg(state.back.qrImg),
+      },
+      spreads: state.spreads.map(sp => ({
+        fused: sp.fused, fusedPanX: sp.fusedPanX, fusedPanY: sp.fusedPanY, fusedCap: sp.fusedCap, fusedZoom: sp.fusedZoom,
+        fusedImgData: serializableImg(sp.fusedImg),
+        a: { cap: sp.a.cap, fit: sp.a.fit, panX: sp.a.panX, panY: sp.a.panY, zoom: sp.a.zoom, imgData: serializableImg(sp.a.img) },
+        b: { cap: sp.b.cap, fit: sp.b.fit, panX: sp.b.panX, panY: sp.b.panY, zoom: sp.b.zoom, imgData: serializableImg(sp.b.img) },
+      })),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(s));
+  } catch(e) {
+    // quota exceeded — silently skip
+  }
+}
+
+function scheduleAutoSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, 500);
+}
+
+async function loadSavedState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+
+    if (s.paper) state.paper = s.paper;
+    if (Array.isArray(s.spreadOrder)) spreadOrder = s.spreadOrder;
+
+    async function restoreImg(dataUrl) { return dataUrl ? imageFromDataURL(dataUrl) : null; }
+
+    if (s.cover) {
+      Object.assign(state.cover, s.cover);
+      state.cover.img = await restoreImg(s.cover.imgData);
+    }
+    if (s.back) {
+      Object.assign(state.back, s.back);
+      state.back.img = await restoreImg(s.back.imgData);
+      state.back.qrImg = await restoreImg(s.back.qrImgData);
+    }
+    if (Array.isArray(s.spreads)) {
+      for (let i = 0; i < s.spreads.length && i < SPREAD_COUNT; i++) {
+        const ss = s.spreads[i], sp = state.spreads[i];
+        sp.fused = ss.fused || false;
+        sp.fusedPanX = ss.fusedPanX || 0; sp.fusedPanY = ss.fusedPanY || 0;
+        sp.fusedCap = ss.fusedCap || ""; sp.fusedZoom = ss.fusedZoom || 1;
+        sp.fusedImg = await restoreImg(ss.fusedImgData);
+        if (ss.a) { Object.assign(sp.a, ss.a); sp.a.img = await restoreImg(ss.a.imgData); }
+        if (ss.b) { Object.assign(sp.b, ss.b); sp.b.img = await restoreImg(ss.b.imgData); }
+      }
+    }
+    return true;
+  } catch(e) { return false; }
+}
+
+/* ============================================================
+   Pan drag helper
+   ============================================================ */
+function addPanDrag(canvas, getImg, getPan, setPan, opts) {
+  const { pageId, showPlaceholder = false, onMove, getZoom, setZoom } = opts;
+  let dragging = false, sx = 0, sy = 0, spx = 0, spy = 0;
+  let lastPinchDist = null;
+  canvas.style.cursor = "grab";
+
+  canvas.addEventListener("pointerdown", e => {
+    if (!getImg()) return;
+    if (e.isPrimary === false) return;
+    e.preventDefault(); dragging = true;
+    sx = e.clientX; sy = e.clientY;
+    [spx, spy] = getPan();
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = "grabbing";
+  });
+
+  canvas.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    const img = getImg();
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    const zoom = getZoom ? getZoom() : 1;
+    const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight) * zoom;
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+    const ox = Math.max(1, (dw - w) / 2), oy = Math.max(1, (dh - h) / 2);
+    const nx = Math.max(-1, Math.min(1, spx + (e.clientX - sx) / ox));
+    const ny = Math.max(-1, Math.min(1, spy + (e.clientY - sy) / oy));
+    setPan(nx, ny);
+    drawToThumb(canvas, pageId, showPlaceholder);
+    if (onMove) onMove(); else renderPreview();
+    scheduleAutoSave();
+  });
+
+  const end = () => { dragging = false; canvas.style.cursor = "grab"; };
+  canvas.addEventListener("pointerup", end);
+  canvas.addEventListener("pointercancel", end);
+
+  if (getZoom && setZoom) {
+    canvas.addEventListener("wheel", e => {
+      if (!getImg()) return;
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setZoom(Math.max(0.25, Math.min(4, getZoom() * factor)));
+      drawToThumb(canvas, pageId, showPlaceholder);
+      if (onMove) onMove(); else renderPreview();
+      scheduleAutoSave();
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", e => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (lastPinchDist !== null) {
+        setZoom(Math.max(0.25, Math.min(4, getZoom() * (dist / lastPinchDist))));
+        drawToThumb(canvas, pageId, showPlaceholder);
+        if (onMove) onMove(); else renderPreview();
+        scheduleAutoSave();
+      }
+      lastPinchDist = dist;
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", () => { lastPinchDist = null; });
+    canvas.addEventListener("touchcancel", () => { lastPinchDist = null; });
+  }
+}
+
+/* ============================================================
+   Drag-and-drop upload helper
+   ============================================================ */
+function addDropZone(el, onFile) {
+  el.addEventListener("dragover", e => {
+    if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); el.classList.add("drag-over"); }
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("drag-over"));
+  el.addEventListener("drop", e => {
+    if (e.dataTransfer.types.includes("Files")) {
+      e.preventDefault(); el.classList.remove("drag-over");
+      const f = e.dataTransfer.files[0];
+      if (f?.type.startsWith("image/")) onFile(f);
+    }
+  });
+}
+
+/* ============================================================
+   Booklet preview
+   ============================================================ */
+const bookletRoot = document.getElementById("bookletPreview");
+function buildPreviewSlots() {
+  for (let p = 1; p <= 8; p++) {
+    const mini = document.createElement("div");
+    mini.className = "mini"; mini.dataset.page = p;
+    const c = document.createElement("canvas"); mini.appendChild(c);
+    const ps = pageState(p);
+    addPanDrag(c, ps.getImg, ps.getPan, ps.setPan, {
+      pageId: p, showPlaceholder: true,
+      getZoom: ps.getZoom, setZoom: ps.setZoom,
+      onMove: () => { renderPreview(); refreshEditorCanvas(p); },
+    });
+    const num = document.createElement("span"); num.className = "mini-num"; num.textContent = p;
+    mini.appendChild(num); bookletRoot.appendChild(mini);
+  }
+}
+
+function refreshEditorCanvas(pageId) {
+  let canvas;
+  if (pageId === 1) { canvas = document.querySelector('.slot[data-slot="cover"] canvas'); }
+  else if (pageId === 8) { canvas = document.querySelector('.slot[data-slot="back"] canvas'); }
+  else { canvas = document.querySelector(`.pg-canvas[data-page-id="${pageId}"]`); }
+  if (canvas && !canvas.hidden) drawToThumb(canvas, pageId);
+}
+function renderPreview() {
+  bookletRoot.querySelectorAll(".mini").forEach(mini => {
+    drawToThumb(mini.querySelector("canvas"), Number(mini.dataset.page), true);
+  });
+}
+
+/* ============================================================
+   Cover / Back slot
    ============================================================ */
 async function handleSimpleFile(which, file) {
   let img;
-  try {
-    img = await fileToImage(file);
-  } catch (e) {
-    showToast("That file isn't a readable image.");
-    return;
-  }
+  try { img = await fileToImage(file); }
+  catch(e) { showToast("That file isn't a readable image."); return; }
   state[which].img = img;
-  refreshSimpleSlot(which);
-  renderPreview();
+  refreshSimpleSlot(which); renderPreview(); scheduleAutoSave();
 }
 function clearSimple(which) {
-  state[which].img = null;
-  refreshSimpleSlot(which);
-  renderPreview();
+  state[which].img = null; refreshSimpleSlot(which); renderPreview(); scheduleAutoSave();
 }
 function refreshSimpleSlot(which) {
+  const pageId = which === "cover" ? 1 : 8;
   const slot = document.querySelector(`.slot[data-slot="${which}"]`);
   const clearBtn = slot.querySelector(".slot-clear");
   let canvas = slot.querySelector("canvas");
   if (state[which].img) {
     if (!canvas) {
       canvas = document.createElement("canvas");
-      slot.insertBefore(canvas, slot.querySelector(".slot-clear"));
+      canvas.className = "slot-canvas";
+      slot.insertBefore(canvas, clearBtn);
+      const s = state[which];
+      addPanDrag(canvas,
+        () => s.img,
+        () => [s.panX, s.panY],
+        (nx, ny) => { s.panX = nx; s.panY = ny; },
+        { pageId, getZoom: () => s.zoom || 1, setZoom: z => { s.zoom = z; } });
     }
-    slot.classList.add("has-image");
-    clearBtn.hidden = false;
-    drawToThumb(canvas, which === "cover" ? 1 : 8);
+    slot.classList.add("has-image"); clearBtn.hidden = false;
+    requestAnimationFrame(() => drawToThumb(canvas, pageId));
   } else {
-    slot.classList.remove("has-image");
-    clearBtn.hidden = true;
+    slot.classList.remove("has-image"); clearBtn.hidden = true;
     if (canvas) canvas.remove();
   }
 }
 
 /* ============================================================
-   Booklet preview (reading order: 1..8)
+   Control builders
    ============================================================ */
-const bookletRoot = document.getElementById("bookletPreview");
-function buildPreviewSlots() {
-  for (let p = 1; p <= 8; p++) {
-    const mini = document.createElement("div");
-    mini.className = "mini";
-    mini.dataset.page = p;
-    const c = document.createElement("canvas");
-    mini.appendChild(c);
-    const num = document.createElement("span");
-    num.className = "mini-num";
-    num.textContent = p;
-    mini.appendChild(num);
-    bookletRoot.appendChild(mini);
-  }
+function makeFitToggle(stateObj, onChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "ctrl-row";
+  const label = document.createElement("span"); label.className = "ctrl-label"; label.textContent = "Fit";
+  wrap.appendChild(label);
+  const grp = document.createElement("div"); grp.className = "btn-group";
+  ["cover", "contain"].forEach(val => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "seg-btn" + (stateObj.fit === val ? " active" : "");
+    b.textContent = val === "cover" ? "Fill" : "Fit";
+    b.addEventListener("click", () => {
+      stateObj.fit = val;
+      grp.querySelectorAll(".seg-btn").forEach((btn, i) => btn.classList.toggle("active", ["cover","contain"][i] === val));
+      onChange();
+    });
+    grp.appendChild(b);
+  });
+  wrap.appendChild(grp);
+  return wrap;
 }
-function renderPreview() {
-  bookletRoot.querySelectorAll(".mini").forEach((mini) => {
-    const p = Number(mini.dataset.page);
-    const canvas = mini.querySelector("canvas");
-    drawToThumb(canvas, p);
+
+function makeAlignToggle(stateObj, onChange) {
+  const wrap = document.createElement("div"); wrap.className = "ctrl-row";
+  const label = document.createElement("span"); label.className = "ctrl-label"; label.textContent = "Align";
+  wrap.appendChild(label);
+  const grp = document.createElement("div"); grp.className = "btn-group";
+  const opts = [["left","←"],["center","↔"],["right","→"]];
+  opts.forEach(([val, sym]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "seg-btn" + (stateObj.textAlign === val ? " active" : "");
+    b.textContent = sym; b.title = val;
+    b.addEventListener("click", () => {
+      stateObj.textAlign = val;
+      grp.querySelectorAll(".seg-btn").forEach((btn, i) => btn.classList.toggle("active", opts[i][0] === val));
+      onChange();
+    });
+    grp.appendChild(b);
+  });
+  wrap.appendChild(grp);
+  return wrap;
+}
+
+function makeTitleSize(stateObj, onChange) {
+  const wrap = document.createElement("div"); wrap.className = "ctrl-row";
+  const label = document.createElement("span"); label.className = "ctrl-label"; label.textContent = "Title size";
+  wrap.appendChild(label);
+  const slider = document.createElement("input");
+  slider.type = "range"; slider.min = "0.5"; slider.max = "2"; slider.step = "0.05";
+  slider.value = stateObj.titleSize || 1;
+  slider.className = "ctrl-slider";
+  slider.addEventListener("input", () => { stateObj.titleSize = parseFloat(slider.value); onChange(); });
+  wrap.appendChild(slider);
+  return wrap;
+}
+
+function makeOverlayControls(stateObj, onChange) {
+  const wrap = document.createElement("div"); wrap.className = "ctrl-col";
+
+  const row1 = document.createElement("div"); row1.className = "ctrl-row";
+  const label = document.createElement("span"); label.className = "ctrl-label"; label.textContent = "Overlay";
+  row1.appendChild(label);
+  const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = !!stateObj.overlay;
+  toggle.className = "ctrl-check";
+  toggle.addEventListener("change", () => { stateObj.overlay = toggle.checked; extras.hidden = !toggle.checked; onChange(); });
+  row1.appendChild(toggle);
+  wrap.appendChild(row1);
+
+  const extras = document.createElement("div"); extras.className = "ctrl-col ctrl-indent"; extras.hidden = !stateObj.overlay;
+  const row2 = document.createElement("div"); row2.className = "ctrl-row";
+  const cl = document.createElement("span"); cl.className = "ctrl-label"; cl.textContent = "Color";
+  row2.appendChild(cl);
+  const colorPicker = document.createElement("input"); colorPicker.type = "color"; colorPicker.value = stateObj.overlayColor || "#000000";
+  colorPicker.className = "ctrl-color";
+  colorPicker.addEventListener("input", () => { stateObj.overlayColor = colorPicker.value; onChange(); });
+  row2.appendChild(colorPicker);
+  extras.appendChild(row2);
+
+  const row3 = document.createElement("div"); row3.className = "ctrl-row";
+  const ol = document.createElement("span"); ol.className = "ctrl-label"; ol.textContent = "Opacity";
+  row3.appendChild(ol);
+  const opSlider = document.createElement("input"); opSlider.type = "range"; opSlider.min = "0"; opSlider.max = "1"; opSlider.step = "0.05";
+  opSlider.value = stateObj.overlayOpacity ?? 0.45; opSlider.className = "ctrl-slider";
+  opSlider.addEventListener("input", () => { stateObj.overlayOpacity = parseFloat(opSlider.value); onChange(); });
+  row3.appendChild(opSlider);
+  extras.appendChild(row3);
+  wrap.appendChild(extras);
+  return wrap;
+}
+
+function makeFontControls(stateObj, onChange) {
+  const wrap = document.createElement("div"); wrap.className = "ctrl-col";
+
+  const row1 = document.createElement("div"); row1.className = "ctrl-row";
+  const fl = document.createElement("span"); fl.className = "ctrl-label"; fl.textContent = "Font";
+  row1.appendChild(fl);
+  const sel = document.createElement("select"); sel.className = "ctrl-select";
+  Object.entries(FONTS).forEach(([key, { label }]) => {
+    const opt = document.createElement("option"); opt.value = key; opt.textContent = label;
+    if (stateObj.font === key) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener("change", () => { stateObj.font = sel.value; onChange(); });
+  row1.appendChild(sel);
+  wrap.appendChild(row1);
+
+  const row2 = document.createElement("div"); row2.className = "ctrl-row";
+  const cl = document.createElement("span"); cl.className = "ctrl-label"; cl.textContent = "Text color";
+  row2.appendChild(cl);
+  const colorPicker = document.createElement("input"); colorPicker.type = "color";
+  colorPicker.value = stateObj.fontColor || "#ffffff"; colorPicker.className = "ctrl-color";
+  colorPicker.addEventListener("input", () => { stateObj.fontColor = colorPicker.value; onChange(); });
+  row2.appendChild(colorPicker);
+
+  const resetBtn = document.createElement("button"); resetBtn.type = "button";
+  resetBtn.className = "ctrl-reset"; resetBtn.textContent = "Auto";
+  resetBtn.title = "Reset to automatic color";
+  resetBtn.addEventListener("click", () => { stateObj.fontColor = ""; onChange(); });
+  row2.appendChild(resetBtn);
+  wrap.appendChild(row2);
+  return wrap;
+}
+
+function makeBgColorControl(stateObj, onChange) {
+  const wrap = document.createElement("div"); wrap.className = "ctrl-row";
+  const label = document.createElement("span"); label.className = "ctrl-label"; label.textContent = "Background";
+  wrap.appendChild(label);
+  const colorPicker = document.createElement("input"); colorPicker.type = "color";
+  colorPicker.value = stateObj.bgColor || "#ffffff"; colorPicker.className = "ctrl-color";
+  colorPicker.addEventListener("input", () => { stateObj.bgColor = colorPicker.value; onChange(); });
+  wrap.appendChild(colorPicker);
+  const clearBtn = document.createElement("button"); clearBtn.type = "button";
+  clearBtn.className = "ctrl-reset"; clearBtn.textContent = "None";
+  clearBtn.title = "Remove background color";
+  clearBtn.addEventListener("click", () => { stateObj.bgColor = ""; onChange(); });
+  wrap.appendChild(clearBtn);
+  return wrap;
+}
+
+function buildCoverControls(which) {
+  const el = document.getElementById(`${which}-controls`);
+  if (!el) return;
+  el.innerHTML = "";
+  const s = state[which];
+  const onChange = () => { refreshSimpleSlot(which); renderPreview(); scheduleAutoSave(); };
+  el.appendChild(makeBgColorControl(s, onChange));
+  el.appendChild(makeFitToggle(s, onChange));
+  el.appendChild(makeAlignToggle(s, onChange));
+  el.appendChild(makeTitleSize(s, onChange));
+  el.appendChild(makeOverlayControls(s, onChange));
+  el.appendChild(makeFontControls(s, onChange));
+}
+
+/* ============================================================
+   Spreads
+   ============================================================ */
+const spreadsRoot = document.getElementById("spreads");
+let dragSrcIndex = null; // position in spreadOrder being dragged
+
+function buildSpreads() {
+  spreadsRoot.innerHTML = "";
+  spreadOrder.forEach((sIdx, pos) => buildSpreadCard(sIdx, pos));
+}
+
+function buildSpreadCard(sIdx, pos) {
+  const pages = SPREAD_PAGES[pos]; // pages[0]=left, pages[1]=right
+  const sp = state.spreads[sIdx];
+
+  const card = document.createElement("article");
+  card.className = "spread-card"; card.dataset.pos = pos; card.dataset.sIdx = sIdx;
+  card.draggable = true;
+
+  card.addEventListener("dragstart", e => {
+    dragSrcIndex = pos;
+    e.dataTransfer.effectAllowed = "move";
+    setTimeout(() => card.classList.add("dragging"), 0);
+  });
+  card.addEventListener("dragend", () => { card.classList.remove("dragging"); dragSrcIndex = null; });
+  card.addEventListener("dragover", e => { e.preventDefault(); card.classList.add("drag-target"); });
+  card.addEventListener("dragleave", () => card.classList.remove("drag-target"));
+  card.addEventListener("drop", e => {
+    e.preventDefault(); card.classList.remove("drag-target");
+    if (dragSrcIndex === null || dragSrcIndex === pos) return;
+    const tmp = spreadOrder[dragSrcIndex]; spreadOrder[dragSrcIndex] = spreadOrder[pos]; spreadOrder[pos] = tmp;
+    buildSpreads(); renderPreview(); scheduleAutoSave();
+  });
+
+  // Header
+  const head = document.createElement("div"); head.className = "spread-head";
+  const grip = document.createElement("span"); grip.className = "drag-grip"; grip.textContent = "⠿"; grip.title = "Drag to reorder";
+  head.appendChild(grip);
+  const h2 = document.createElement("h2");
+  h2.innerHTML = `Spread <span class="page-tag">pages ${pages[0]}–${pages[1]}</span>`;
+  head.appendChild(h2);
+  const headBtns = document.createElement("div"); headBtns.className = "spread-head-btns";
+
+  // Swap button
+  const swapBtn = document.createElement("button"); swapBtn.type = "button"; swapBtn.className = "icon-btn"; swapBtn.title = "Swap pages";
+  swapBtn.textContent = "⇄";
+  swapBtn.addEventListener("click", () => {
+    const tmp = sp.a; sp.a = sp.b; sp.b = tmp;
+    buildSpreads(); renderPreview(); scheduleAutoSave();
+  });
+  headBtns.appendChild(swapBtn);
+
+  // Merge/split button
+  const fuseBtn = document.createElement("button"); fuseBtn.type = "button"; fuseBtn.className = "icon-btn";
+  fuseBtn.title = sp.fused ? "Split into two pages" : "Merge into one image";
+  fuseBtn.textContent = sp.fused ? "Split" : "Merge";
+  fuseBtn.addEventListener("click", () => {
+    sp.fused = !sp.fused;
+    if (sp.fused && !sp.fusedImg && (sp.a.img || sp.b.img)) sp.fusedImg = sp.a.img || sp.b.img;
+    buildSpreads(); renderPreview(); scheduleAutoSave();
+  });
+  headBtns.appendChild(fuseBtn);
+
+  // Clear button
+  const clearBtn = document.createElement("button"); clearBtn.type = "button"; clearBtn.className = "spread-clear";
+  clearBtn.textContent = "Clear"; clearBtn.hidden = !hasSpreadContent(sp);
+  clearBtn.addEventListener("click", () => {
+    sp.fused = false; sp.fusedImg = null; sp.fusedPanX = 0; sp.fusedPanY = 0; sp.fusedCap = ""; sp.fusedZoom = 1;
+    sp.a = freshPage(); sp.b = freshPage();
+    buildSpreads(); renderPreview(); scheduleAutoSave();
+  });
+  headBtns.appendChild(clearBtn);
+  head.appendChild(headBtns);
+  card.appendChild(head);
+
+  if (sp.fused) {
+    buildFusedStage(card, sp, sIdx, pages);
+  } else {
+    buildSplitStage(card, sp, sIdx, pages);
+  }
+
+  spreadsRoot.appendChild(card);
+}
+
+function hasSpreadContent(sp) {
+  return !!(sp.fusedImg || sp.a.img || sp.b.img);
+}
+
+function buildFusedStage(card, sp, sIdx, pages) {
+  const stage = document.createElement("div"); stage.className = "spread-stage is-landscape";
+
+  const leftPage = buildPageDiv(sIdx, "left", pages[0], sp.a, sp, true);
+  const rightPage = buildPageDiv(sIdx, "right", pages[1], sp.b, sp, true);
+  stage.appendChild(leftPage); stage.appendChild(rightPage);
+  card.appendChild(stage);
+
+  // Fused image upload
+  const hint = document.createElement("div"); hint.className = "spread-meta";
+  const hintSpan = document.createElement("span"); hintSpan.className = "spread-hint";
+  hintSpan.textContent = sp.fusedImg ? "Drag photo to pan across spread" : "Upload an image to span both pages";
+  hint.appendChild(hintSpan);
+  card.appendChild(hint);
+
+  if (!sp.fusedImg) {
+    const uploadRow = document.createElement("div"); uploadRow.className = "fused-upload";
+    const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = "image/*";
+    const lbl = document.createElement("label"); lbl.className = "upload-btn"; lbl.textContent = "Choose photo for merged spread";
+    lbl.appendChild(fileInput);
+    fileInput.addEventListener("change", async e => {
+      const f = e.target.files[0]; if (!f) return;
+      try { sp.fusedImg = await fileToImage(f); } catch(err) { showToast("Not a readable image."); return; }
+      buildSpreads(); renderPreview(); scheduleAutoSave();
+    });
+    addDropZone(uploadRow, async f => {
+      try { sp.fusedImg = await fileToImage(f); } catch(err) { showToast("Not a readable image."); return; }
+      buildSpreads(); renderPreview(); scheduleAutoSave();
+    });
+    uploadRow.appendChild(lbl); card.appendChild(uploadRow);
+  }
+
+  // Fused caption
+  const capRow = document.createElement("div"); capRow.className = "captions";
+  const capInput = document.createElement("input"); capInput.type = "text"; capInput.className = "txt";
+  capInput.placeholder = "Caption (optional)"; capInput.value = sp.fusedCap; capInput.maxLength = 100;
+  capInput.addEventListener("input", () => { sp.fusedCap = capInput.value; renderPreview(); scheduleAutoSave(); });
+  capRow.appendChild(capInput); card.appendChild(capRow);
+}
+
+function buildSplitStage(card, sp, sIdx, pages) {
+  const stage = document.createElement("div"); stage.className = "spread-stage";
+  const leftPage = buildPageDiv(sIdx, "left", pages[0], sp.a, sp, false);
+  const rightPage = buildPageDiv(sIdx, "right", pages[1], sp.b, sp, false);
+  stage.appendChild(leftPage); stage.appendChild(rightPage);
+  card.appendChild(stage);
+
+  const meta = document.createElement("div"); meta.className = "spread-meta";
+  const hint = document.createElement("span"); hint.className = "spread-hint";
+  hint.textContent = "Upload photos for left and right pages, or click Merge for a single spanning image.";
+  meta.appendChild(hint); card.appendChild(meta);
+
+  const capRow = document.createElement("div"); capRow.className = "captions";
+  ["left","right"].forEach(side => {
+    const pg = side === "left" ? sp.a : sp.b;
+    const inp = document.createElement("input"); inp.type = "text"; inp.className = "txt";
+    inp.placeholder = `${side.charAt(0).toUpperCase()+side.slice(1)} caption`; inp.value = pg.cap; inp.maxLength = 80;
+    inp.addEventListener("input", () => { pg.cap = inp.value; renderPreview(); scheduleAutoSave(); });
+
+    // Fit toggle per page
+    const fitWrap = document.createElement("div"); fitWrap.className = "page-fit-row";
+    ["cover","contain"].forEach(val => {
+      const b = document.createElement("button"); b.type = "button";
+      b.className = "seg-btn sm" + (pg.fit === val ? " active" : "");
+      b.textContent = val === "cover" ? "Fill" : "Fit";
+      b.addEventListener("click", () => {
+        pg.fit = val; fitWrap.querySelectorAll(".seg-btn").forEach((btn,i) => btn.classList.toggle("active", ["cover","contain"][i] === val));
+        renderPreview(); scheduleAutoSave();
+      });
+      fitWrap.appendChild(b);
+    });
+    const col = document.createElement("div"); col.className = "cap-col";
+    col.appendChild(inp); col.appendChild(fitWrap); capRow.appendChild(col);
+  });
+  card.appendChild(capRow);
+}
+
+function buildPageDiv(sIdx, side, pageId, pageData, sp, fused) {
+  const div = document.createElement("div"); div.className = "spread-page"; div.dataset.side = side;
+  const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = "image/*";
+  fileInput.className = "file-input";
+
+  const canvas = document.createElement("canvas"); canvas.className = "pg-canvas"; canvas.dataset.pageId = pageId; canvas.hidden = true;
+  const lbl = document.createElement("label"); lbl.className = "slot-label";
+  lbl.innerHTML = `<span class="slot-icon">＋</span><span class="slot-text">Add photo here</span>`;
+
+  div.appendChild(fileInput); div.appendChild(canvas); div.appendChild(lbl);
+
+  function refresh() {
+    const hasImg = fused ? !!sp.fusedImg : !!pageData.img;
+    div.classList.toggle("has-image", hasImg);
+    if (hasImg) {
+      canvas.hidden = false;
+      // Use rAF so the canvas is in the DOM and laid out before we measure it.
+      requestAnimationFrame(() => drawToThumb(canvas, pageId));
+    } else {
+      canvas.hidden = true;
+    }
+  }
+
+  fileInput.addEventListener("change", async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const img = await fileToImage(f);
+      if (fused) { sp.fusedImg = img; buildSpreads(); }
+      else {
+        pageData.img = img;
+        if (isLandscape(img) && !sp.fused && !sp.fusedImg) {
+          sp.fused = true; sp.fusedImg = img; buildSpreads();
+        } else { refresh(); }
+      }
+    } catch(err) { showToast("Not a readable image."); return; }
+    renderPreview(); scheduleAutoSave();
+  });
+
+  addDropZone(div, async f => {
+    try {
+      const img = await fileToImage(f);
+      if (fused) { sp.fusedImg = img; buildSpreads(); }
+      else {
+        pageData.img = img;
+        if (isLandscape(img) && !sp.fused) { sp.fused = true; sp.fusedImg = img; buildSpreads(); }
+        else { refresh(); }
+      }
+    } catch(err) { showToast("Not a readable image."); }
+    renderPreview(); scheduleAutoSave();
+  });
+
+  if (!fused) {
+    addPanDrag(canvas,
+      () => pageData.img,
+      () => [pageData.panX, pageData.panY],
+      (nx, ny) => { pageData.panX = nx; pageData.panY = ny; },
+      { pageId, getZoom: () => pageData.zoom || 1, setZoom: z => { pageData.zoom = z; } });
+  } else {
+    addPanDrag(canvas,
+      () => sp.fusedImg,
+      () => [sp.fusedPanX, sp.fusedPanY],
+      (nx, ny) => { sp.fusedPanX = nx; sp.fusedPanY = ny; },
+      { pageId, getZoom: () => sp.fusedZoom || 1, setZoom: z => { sp.fusedZoom = z; } });
+  }
+
+  refresh();
+  return div;
+}
+
+/* ============================================================
+   Start Over
+   ============================================================ */
+function showConfirm(msg, onOk) {
+  const overlay = document.getElementById("confirm-overlay");
+  overlay.querySelector(".confirm-msg").textContent = msg;
+  overlay.hidden = false;
+  const ok = overlay.querySelector(".confirm-ok");
+  const cancel = overlay.querySelector(".confirm-cancel");
+  const close = () => { overlay.hidden = true; ok.onclick = null; cancel.onclick = null; };
+  ok.onclick = () => { close(); onOk(); };
+  cancel.onclick = close;
+}
+
+function startOver() {
+  showConfirm("Clear everything and start fresh?", () => {
+    Object.assign(state.cover, freshCover());
+    Object.assign(state.back, freshCover(), { notes: "", qrLink: "", qrImg: null });
+    state.spreads = Array.from({ length: SPREAD_COUNT }, freshSpread);
+    spreadOrder = [0, 1, 2];
+    state.paper = "letter";
+    document.getElementById("paperSize").value = "letter";
+    document.getElementById("coverTitle").value = "";
+    document.getElementById("coverSubtitle").value = "";
+    document.getElementById("coverAuthor").value = "";
+    document.getElementById("backTitle").value = "";
+    document.getElementById("backSubtitle").value = "";
+    document.getElementById("backAuthor").value = "";
+    document.getElementById("backNotes").value = "";
+    document.getElementById("qrLink").value = "";
+    localStorage.removeItem(SAVE_KEY);
+    buildCoverControls("cover"); buildCoverControls("back");
+    refreshSimpleSlot("cover"); refreshSimpleSlot("back");
+    buildSpreads(); renderPreview();
+    showToast("Started fresh.");
   });
 }
 
 /* ============================================================
-   PDF generation (client-side imposition)
-   single-sided sheet, 4 cols x 2 rows:
-     bottom row (upright): 6 7 8 1
-     top row (rot 180):    5 4 3 2
+   Export
    ============================================================ */
 const IMPOSITION = [
-  // {page, col, row(0=top), rotate}
   { page: 5, col: 0, row: 0, rot: true },
   { page: 4, col: 1, row: 0, rot: true },
   { page: 3, col: 2, row: 0, rot: true },
@@ -498,75 +1070,58 @@ const IMPOSITION = [
   { page: 1, col: 3, row: 1, rot: false },
 ];
 
-function generatePDF() {
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    showToast("PDF library still loading — try again in a moment.");
-    return;
+function buildSheetCanvas() {
+  if (!window.jspdf?.jsPDF) { showToast("PDF library still loading — try again."); return null; }
+  const DPI = 300, p = paperInches();
+  const u = Math.round((p.w / 4) * DPI), v = Math.round((p.h / 2) * DPI);
+  const sheet = document.getElementById("workCanvas");
+  sheet.width = u * 4; sheet.height = v * 2;
+  const ctx = sheet.getContext("2d");
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, sheet.width, sheet.height);
+  const panel = document.createElement("canvas"); panel.width = u; panel.height = v;
+  const pctx = panel.getContext("2d");
+  for (const cell of IMPOSITION) {
+    pctx.clearRect(0, 0, u, v); renderPage(pctx, 0, 0, u, v, cell.page);
+    const px = cell.col * u, py = cell.row * v;
+    if (cell.rot) {
+      ctx.save(); ctx.translate(px + u / 2, py + v / 2); ctx.rotate(Math.PI);
+      ctx.drawImage(panel, -u / 2, -v / 2, u, v); ctx.restore();
+    } else { ctx.drawImage(panel, px, py, u, v); }
   }
-  const btn = document.getElementById("downloadBtn");
-  btn.disabled = true;
-  btn.textContent = "Building…";
+  return sheet;
+}
 
-  // Defer so the button state paints before the heavy work.
+function generatePDF() {
+  const btn = document.getElementById("downloadBtn");
+  btn.disabled = true; btn.textContent = "Building…";
   setTimeout(() => {
     try {
-      const DPI = 300;
-      const p = paperInches();
-      const u = Math.round((p.w / 4) * DPI); // panel width px
-      const v = Math.round((p.h / 2) * DPI); // panel height px
-      const sheetW = u * 4;
-      const sheetH = v * 2;
-
-      const sheet = document.getElementById("workCanvas");
-      sheet.width = sheetW;
-      sheet.height = sheetH;
-      const ctx = sheet.getContext("2d");
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, sheetW, sheetH);
-
-      // render each page to an offscreen panel canvas, then place it
-      const panel = document.createElement("canvas");
-      panel.width = u;
-      panel.height = v;
-      const pctx = panel.getContext("2d");
-
-      for (const cell of IMPOSITION) {
-        pctx.clearRect(0, 0, u, v);
-        renderPage(pctx, 0, 0, u, v, cell.page);
-        const px = cell.col * u;
-        const py = cell.row * v;
-        if (cell.rot) {
-          ctx.save();
-          ctx.translate(px + u / 2, py + v / 2);
-          ctx.rotate(Math.PI);
-          ctx.drawImage(panel, -u / 2, -v / 2, u, v);
-          ctx.restore();
-        } else {
-          ctx.drawImage(panel, px, py, u, v);
-        }
-      }
-
+      const sheet = buildSheetCanvas(); if (!sheet) return;
       const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({
-        orientation: "landscape",
-        unit: "in",
-        format: state.paper === "a4" ? "a4" : "letter",
-      });
-      const imgData = sheet.toDataURL("image/jpeg", 0.92);
-      doc.addImage(imgData, "JPEG", 0, 0, p.w, p.h);
-      const name = (state.cover.title || "little-zine")
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "") || "little-zine";
+      const p = paperInches();
+      const doc = new jsPDF({ orientation: "landscape", unit: "in", format: state.paper === "a4" ? "a4" : "letter" });
+      doc.addImage(sheet.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, p.w, p.h);
+      const name = (state.cover.title || "zine").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g,"") || "zine";
       doc.save(`${name}.pdf`);
       showToast("PDF downloaded — print at 100%, single-sided.");
-    } catch (e) {
-      console.error(e);
-      showToast("Something went wrong building the PDF.");
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "Download PDF";
-    }
+    } catch(e) { console.error(e); showToast("Something went wrong building the PDF."); }
+    finally { btn.disabled = false; btn.textContent = "Download PDF"; }
+  }, 30);
+}
+
+function generateJPG() {
+  const btn = document.getElementById("jpgBtn");
+  btn.disabled = true; btn.textContent = "Building…";
+  setTimeout(() => {
+    try {
+      const sheet = buildSheetCanvas(); if (!sheet) return;
+      const a = document.createElement("a");
+      const name = (state.cover.title || "zine").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g,"") || "zine";
+      a.href = sheet.toDataURL("image/jpeg", 0.92);
+      a.download = `${name}.jpg`; a.click();
+      showToast("JPG downloaded.");
+    } catch(e) { showToast("Something went wrong."); }
+    finally { btn.disabled = false; btn.textContent = "Save JPG"; }
   }, 30);
 }
 
@@ -575,102 +1130,73 @@ function generatePDF() {
    ============================================================ */
 let toastTimer = null;
 function showToast(msg) {
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 2600);
+  const t = document.getElementById("toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600);
 }
 
 /* ============================================================
-   Wire up
+   Init
    ============================================================ */
-function init() {
-  buildSpreads();
+async function init() {
   buildPreviewSlots();
+  buildSpreads();
 
-  // paper size
-  document.getElementById("paperSize").addEventListener("change", (e) => {
-    state.paper = e.target.value;
-    // aspect ratios change slightly; re-render everything
-    document.querySelectorAll(".spread-page .pg-canvas").forEach((c) => {
-      if (!c.hidden) {
-        const stage = c.closest(".spread-stage");
-        const sId = Number(stage.dataset.spread);
-        refreshSpread(sId);
-      }
-    });
-    refreshSimpleSlot("cover");
-    refreshSimpleSlot("back");
-    renderPreview();
-  });
+  // Restore saved state
+  const restored = await loadSavedState();
+  if (restored) {
+    // Sync text inputs with restored state
+    document.getElementById("coverTitle").value = state.cover.title || "";
+    document.getElementById("coverSubtitle").value = state.cover.subtitle || "";
+    document.getElementById("coverAuthor").value = state.cover.author || "";
+    document.getElementById("backTitle").value = state.back.title || "";
+    document.getElementById("backSubtitle").value = state.back.subtitle || "";
+    document.getElementById("backAuthor").value = state.back.author || "";
+    document.getElementById("backNotes").value = state.back.notes || "";
+    document.getElementById("qrLink").value = state.back.qrLink || "";
+    document.getElementById("paperSize").value = state.paper;
+    refreshSimpleSlot("cover"); refreshSimpleSlot("back");
+    buildSpreads();
+  }
 
-  // cover text
-  document.getElementById("coverTitle").addEventListener("input", (e) => {
-    state.cover.title = e.target.value;
-    renderPreview();
-  });
-  document.getElementById("coverSubtitle").addEventListener("input", (e) => {
-    state.cover.subtitle = e.target.value;
-    renderPreview();
-  });
-  document.getElementById("coverAuthor").addEventListener("input", (e) => {
-    state.cover.author = e.target.value;
-    renderPreview();
-  });
-  document.getElementById("backText").addEventListener("input", (e) => {
-    state.back.text = e.target.value;
-    renderPreview();
-  });
-
-  // cover / back file inputs + clears
-  document.getElementById("file-cover").addEventListener("change", (e) => {
-    if (e.target.files[0]) handleSimpleFile("cover", e.target.files[0]);
-  });
-  document.getElementById("file-back").addEventListener("change", (e) => {
-    if (e.target.files[0]) handleSimpleFile("back", e.target.files[0]);
-  });
-  document.querySelectorAll(".slot[data-slot] .slot-clear").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const which = btn.closest(".slot").dataset.slot;
-      clearSimple(which);
-    });
-  });
-
-  // spread inputs (event delegation)
-  spreadsRoot.addEventListener("change", (e) => {
-    const input = e.target;
-    if (!input.classList.contains("file-input")) return;
-    if (!input.files[0]) return;
-    handleSpreadFile(Number(input.dataset.spread), input.dataset.side, input.files[0]);
-  });
-  spreadsRoot.addEventListener("click", (e) => {
-    if (e.target.classList.contains("spread-clear")) {
-      clearSpread(Number(e.target.dataset.spread));
-    }
-  });
-  spreadsRoot.addEventListener("input", (e) => {
-    if (!e.target.dataset.cap) return;
-    const sId = Number(e.target.dataset.spread);
-    const side = e.target.dataset.cap;
-    const sp = state.spreads[sId];
-    if (sp.source && sp.split) {
-      sp.wideCap = e.target.value;
-    } else if (side === "left") {
-      sp.a.cap = e.target.value;
-    } else {
-      sp.b.cap = e.target.value;
-    }
-    renderPreview();
-  });
-
-  document.getElementById("downloadBtn").addEventListener("click", generatePDF);
-
+  buildCoverControls("cover");
+  buildCoverControls("back");
   renderPreview();
+
+  // Paper size
+  document.getElementById("paperSize").addEventListener("change", e => {
+    state.paper = e.target.value; renderPreview(); scheduleAutoSave();
+  });
+
+  // Cover text
+  document.getElementById("coverTitle").addEventListener("input", e => { state.cover.title = e.target.value; renderPreview(); scheduleAutoSave(); });
+  document.getElementById("coverSubtitle").addEventListener("input", e => { state.cover.subtitle = e.target.value; renderPreview(); scheduleAutoSave(); });
+  document.getElementById("coverAuthor").addEventListener("input", e => { state.cover.author = e.target.value; renderPreview(); scheduleAutoSave(); });
+
+  // Back text
+  document.getElementById("backTitle").addEventListener("input", e => { state.back.title = e.target.value; renderPreview(); scheduleAutoSave(); });
+  document.getElementById("backSubtitle").addEventListener("input", e => { state.back.subtitle = e.target.value; renderPreview(); scheduleAutoSave(); });
+  document.getElementById("backAuthor").addEventListener("input", e => { state.back.author = e.target.value; renderPreview(); scheduleAutoSave(); });
+  document.getElementById("backNotes").addEventListener("input", e => { state.back.notes = e.target.value; renderPreview(); scheduleAutoSave(); });
+
+  // QR
+  document.getElementById("qrLink").addEventListener("input", e => { state.back.qrLink = e.target.value; generateQR(e.target.value); scheduleAutoSave(); });
+
+  // Cover / back file inputs + clears
+  document.getElementById("file-cover").addEventListener("change", e => { if (e.target.files[0]) handleSimpleFile("cover", e.target.files[0]); });
+  document.getElementById("file-back").addEventListener("change", e => { if (e.target.files[0]) handleSimpleFile("back", e.target.files[0]); });
+  document.querySelectorAll(".slot[data-slot] .slot-clear").forEach(btn => {
+    btn.addEventListener("click", () => clearSimple(btn.closest(".slot").dataset.slot));
+  });
+
+  // Drag & drop on cover/back slots
+  addDropZone(document.querySelector('.slot[data-slot="cover"]'), f => handleSimpleFile("cover", f));
+  addDropZone(document.querySelector('.slot[data-slot="back"]'), f => handleSimpleFile("back", f));
+
+  // Buttons
+  document.getElementById("downloadBtn").addEventListener("click", generatePDF);
+  document.getElementById("jpgBtn").addEventListener("click", generateJPG);
+  document.getElementById("startOverBtn").addEventListener("click", startOver);
 }
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", init);
-} else {
-  init();
-}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+else init();

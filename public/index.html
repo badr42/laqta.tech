@@ -4,18 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#111111" />
-  <title>Little Zine — 8-page printable zine maker</title>
+  <title>laqta.tech — 8-page printable zine maker</title>
   <meta name="description" content="Make a free printable 8-page zine from your photos. Everything runs in your browser — your photos never leave your device." />
-  <link rel="stylesheet" href="styles.css" />
-  <!-- jsPDF for client-side PDF generation. Loaded from CDN so the server does no work. -->
+  <link rel="stylesheet" href="styles.css?v=3" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+  <script src="app.js?v=3" defer></script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark">◳</span>
-      <span class="brand-name">Little Zine</span>
+      <span class="brand-name">laqta.tech</span>
     </div>
     <div class="topbar-actions">
       <label class="paper-select">
@@ -25,6 +25,8 @@
           <option value="a4">A4</option>
         </select>
       </label>
+      <button id="startOverBtn" class="btn btn-ghost" type="button">Start Over</button>
+      <button id="jpgBtn" class="btn" type="button">Save JPG</button>
       <button id="downloadBtn" class="btn btn-primary" type="button">Download PDF</button>
     </div>
   </header>
@@ -48,14 +50,20 @@
           </label>
           <button class="slot-clear" type="button" hidden>Remove</button>
         </div>
+        <div id="cover-controls" class="section-controls"></div>
       </article>
 
-      <!-- INTERIOR SPREADS injected here -->
+      <!-- INTERIOR SPREADS injected by JS -->
       <div id="spreads"></div>
 
       <!-- BACK COVER -->
       <article class="card" data-section="back">
         <h2 class="card-title">Back cover <span class="page-tag">page 8</span></h2>
+        <div class="cover-fields">
+          <input id="backTitle" class="txt txt-title" type="text" placeholder="Title (optional)" maxlength="40" />
+          <input id="backSubtitle" class="txt" type="text" placeholder="Subtitle (optional)" maxlength="60" />
+          <input id="backAuthor" class="txt" type="text" placeholder="By… (optional)" maxlength="40" />
+        </div>
         <div class="slot slot-portrait" data-slot="back">
           <input type="file" accept="image/*" class="file-input" id="file-back" />
           <label for="file-back" class="slot-label">
@@ -64,18 +72,24 @@
           </label>
           <button class="slot-clear" type="button" hidden>Remove</button>
         </div>
-        <textarea id="backText" class="txt txt-area" placeholder="Credits, contact, notes… (optional)" maxlength="240"></textarea>
+        <div id="back-controls" class="section-controls"></div>
+        <textarea id="backNotes" class="txt txt-area" placeholder="Credits, contact, notes… (optional)" maxlength="240"></textarea>
+        <input id="qrLink" class="txt qr-input" type="url" placeholder="Instagram link → QR code (optional)" />
       </article>
 
       <details class="howto">
         <summary>How to print, fold &amp; cut</summary>
         <ol>
-          <li>Download the PDF and print it on <strong>one side</strong> of a single sheet (Letter or A4), at 100% / actual size.</li>
-          <li>Fold the sheet in half the long way (top edge to bottom edge), crease, and open back up.</li>
-          <li>Fold in half the short way, then in half again to find the panels; open back up.</li>
-          <li>Fold in half the short way and cut the slit along the centre crease (only the middle two panels).</li>
-          <li>Open, fold long-ways again, and push the ends together so the cut opens into a <strong>+</strong>; collapse into a booklet and crease all folds.</li>
+          <li>Download the PDF and print on <strong>one side</strong> of a single sheet at 100% / actual size.</li>
+          <li>Fold in half the long way (top to bottom), crease, open back up.</li>
+          <li>Fold in half the short way, then in half again; open back up.</li>
+          <li>Fold short way and cut the slit along the centre crease (middle two panels only).</li>
+          <li>Open, fold long-ways again, push ends together so the cut opens into a <strong>+</strong>; collapse into a booklet.</li>
         </ol>
+        <img class="howto-diagram" src="https://substackcdn.com/image/fetch/$s_!grM7!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F76b6f1e7-2af1-4845-a453-65748ef2bb2c_2550x3300.jpeg" alt="Zine folding diagram" />
+        <div class="howto-video">
+          <iframe src="https://www.youtube.com/embed/OBZfUTm9D20" title="How to fold a zine" allowfullscreen loading="lazy"></iframe>
+        </div>
       </details>
     </section>
 
@@ -86,10 +100,19 @@
     </aside>
   </main>
 
-  <!-- Hidden canvas used for splitting/resizing and PDF rendering. -->
   <canvas id="workCanvas" hidden></canvas>
-
   <div id="toast" class="toast" hidden></div>
+
+  <!-- Confirm dialog -->
+  <div id="confirm-overlay" class="confirm-overlay" hidden>
+    <div class="confirm-box">
+      <p class="confirm-msg"></p>
+      <div class="confirm-actions">
+        <button class="btn confirm-cancel" type="button">Cancel</button>
+        <button class="btn btn-danger confirm-ok" type="button">Yes, clear it</button>
+      </div>
+    </div>
+  </div>
 
   <footer class="footer">
     <p>Your photos never leave your device — everything runs in your browser.</p>
