@@ -10,10 +10,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Bebas+Neue&family=Lora:wght@400;700&family=Space+Grotesk:wght@400;700&display=swap" />
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
-  <script src="app.js?v=4" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.min.js" defer></script>
+  <script src="app.js?v=5" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -34,7 +35,7 @@
           <option value="a4">A4</option>
         </select>
       </label>
-      <button id="startOverBtn" class="btn btn-ghost" type="button">Start Over</button>
+      <button id="startOverBtn" class="btn btn-ghost" type="button"><span class="btn-label">Start Over</span><span class="btn-icon" aria-hidden="true">↩</span></button>
       <button id="jpgBtn" class="btn" type="button">JPG</button>
       <button id="downloadBtn" class="btn btn-primary" type="button">PDF</button>
     </div>

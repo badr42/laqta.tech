@@ -21,12 +21,13 @@ let spreadOrder = [0, 1, 2];
 
 /* ---------- state factories ---------- */
 function freshPage() {
-  return { img: null, cap: "", fit: "cover", panX: 0, panY: 0, zoom: 1 };
+  return { img: null, cap: "", fit: "cover", panX: 0, panY: 0, zoom: 1, filmSim: null, showFilmSim: false };
 }
 function freshSpread() {
   return {
     fused: false,
     fusedImg: null, fusedPanX: 0, fusedPanY: 0, fusedCap: "", fusedZoom: 1,
+    fusedFilmSim: null, fusedShowFilmSim: false,
     a: freshPage(), b: freshPage(),
   };
 }
@@ -38,6 +39,7 @@ function freshCover() {
     textAlign: "center", titleSize: 1,
     overlay: false, overlayColor: "#000000", overlayOpacity: 0.45,
     fontColor: "", font: "system",
+    filmSim: null, showFilmSim: false,
   };
 }
 
@@ -84,6 +86,34 @@ function imageFromDataURL(dataUrl) {
 }
 function isLandscape(img) {
   return img.naturalWidth >= img.naturalHeight * LANDSCAPE_RATIO;
+}
+
+/* ---------- Fujifilm EXIF helpers ---------- */
+function cleanFilmSimName(raw) {
+  if (!raw) return null;
+  // "F0/Standard (Provia)" → "Provia"
+  const paren = raw.match(/\(([^)]+)\)/);
+  if (paren) return paren[1];
+  // "F4/Classic Chrome" → "Classic Chrome"
+  const slash = raw.indexOf('/');
+  if (slash !== -1) return raw.slice(slash + 1).trim();
+  return raw.trim();
+}
+
+async function parseFilmSim(file) {
+  try {
+    if (typeof exifr === 'undefined') return null;
+    const tags = await exifr.parse(file, { makerNote: true });
+    if (!tags) return null;
+    if (!String(tags.Make || '').toUpperCase().includes('FUJI')) return null;
+    return cleanFilmSimName(tags.FilmMode) || 'Film Sim';
+  } catch (e) { return null; }
+}
+
+async function fileToImageWithExif(file) {
+  const [img, filmSim] = await Promise.all([fileToImage(file), parseFilmSim(file)]);
+  if (filmSim) img._filmSim = filmSim;
+  return img;
 }
 
 function drawCover(ctx, img, x, y, w, h, fit = "cover", panX = 0, panY = 0, zoom = 1) {
@@ -165,6 +195,56 @@ function drawPlaceholder(ctx, x, y, w, h) {
   ctx.fillStyle = "#a1a1aa"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.font = `500 ${Math.max(8, Math.round(h * 0.07))}px -apple-system, Helvetica, Arial, sans-serif`;
   ctx.fillText("Add photo here", x + w / 2, y + h / 2);
+  ctx.restore();
+}
+
+/* ---------- film simulation badge ---------- */
+function drawFilmSimBadge(ctx, x, y, w, h, simName) {
+  ctx.save();
+  const fs = Math.max(7, Math.min(13, Math.round(h * 0.028)));
+  ctx.font = `700 ${fs}px -apple-system, Helvetica, Arial, sans-serif`;
+  const tw = ctx.measureText(simName).width;
+  // Strip dimensions
+  const stripW = fs * 0.9, stripH = fs * 1.1;
+  const perfW = stripW * 0.38, perfH = stripH * 0.26;
+  const gap = fs * 0.35;
+  const padH = fs * 0.52, padV = fs * 0.38;
+  const bw = padH + stripW + gap + tw + padH;
+  const bh = fs + padV * 2;
+  const margin = Math.round(h * 0.018);
+  const bx = x + w - bw - margin;
+  const by = y + h - bh - margin;
+  const r = Math.round(bh * 0.3);
+
+  // Rounded rect background
+  ctx.fillStyle = "rgba(10,10,10,0.74)";
+  ctx.beginPath();
+  ctx.moveTo(bx + r, by);
+  ctx.lineTo(bx + bw - r, by); ctx.arcTo(bx + bw, by, bx + bw, by + r, r);
+  ctx.lineTo(bx + bw, by + bh - r); ctx.arcTo(bx + bw, by + bh, bx + bw - r, by + bh, r);
+  ctx.lineTo(bx + r, by + bh); ctx.arcTo(bx, by + bh, bx, by + bh - r, r);
+  ctx.lineTo(bx, by + r); ctx.arcTo(bx, by, bx + r, by, r);
+  ctx.closePath();
+  ctx.fill();
+
+  // Mini filmstrip icon
+  const sx = bx + padH, sy = by + (bh - stripH) / 2;
+  ctx.fillStyle = "rgba(255,255,255,0.88)";
+  ctx.fillRect(sx, sy, stripW, stripH);
+  // Perforations (2 rows of 2 holes)
+  ctx.fillStyle = "rgba(10,10,10,0.74)";
+  const hGap = (stripW - 2 * perfW) / 3;
+  for (let i = 0; i < 2; i++) {
+    const px = sx + hGap + i * (perfW + hGap);
+    ctx.fillRect(px, sy + 1, perfW, perfH);
+    ctx.fillRect(px, sy + stripH - perfH - 1, perfW, perfH);
+  }
+
+  // Simulation name text
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  ctx.font = `700 ${fs}px -apple-system, Helvetica, Arial, sans-serif`;
+  ctx.fillText(simName, sx + stripW + gap, by + bh / 2);
   ctx.restore();
 }
 
@@ -320,6 +400,7 @@ function renderPage(ctx, x, y, w, h, pageId, showPlaceholder = false) {
     if (c.img) { drawCover(ctx, c.img, x, y, w, h, c.fit, c.panX, c.panY, c.zoom || 1); if (c.overlay) drawOverlay(ctx, x, y, w, h, c.overlayColor, c.overlayOpacity); }
     else if (!c.bgColor && showPlaceholder) drawPlaceholder(ctx, x, y, w, h);
     drawCoverText(ctx, x, y, w, h, !!c.img, c);
+    if (c.img && c.showFilmSim && c.filmSim) drawFilmSimBadge(ctx, x, y, w, h, c.filmSim);
     return;
   }
   if (m.type === "back") {
@@ -330,12 +411,16 @@ function renderPage(ctx, x, y, w, h, pageId, showPlaceholder = false) {
     drawCoverText(ctx, x, y, w, h, !!b.img, b);
     drawBackNotes(ctx, x, y, w, h, !!b.img, b.notes);
     drawBackQR(ctx, x, y, w, h);
+    if (b.img && b.showFilmSim && b.filmSim) drawFilmSimBadge(ctx, x, y, w, h, b.filmSim);
     return;
   }
   const sp = m.spread;
   if (sp.fused && sp.fusedImg) {
     drawSpanHalf(ctx, sp.fusedImg, x, y, w, h, m.side, sp.fusedPanX, sp.fusedPanY, sp.fusedZoom || 1);
-    if (m.side === "right") caption(ctx, sp.fusedCap, x, y, w, h);
+    if (m.side === "right") {
+      caption(ctx, sp.fusedCap, x, y, w, h);
+      if (sp.fusedShowFilmSim && sp.fusedFilmSim) drawFilmSimBadge(ctx, x, y, w, h, sp.fusedFilmSim);
+    }
   } else if (sp.fused && !sp.fusedImg && showPlaceholder) {
     drawPlaceholder(ctx, x, y, w, h);
   } else {
@@ -343,6 +428,7 @@ function renderPage(ctx, x, y, w, h, pageId, showPlaceholder = false) {
     if (page.img) {
       drawCover(ctx, page.img, x, y, w, h, page.fit, page.panX, page.panY, page.zoom || 1);
       caption(ctx, page.cap, x, y, w, h);
+      if (page.showFilmSim && page.filmSim) drawFilmSimBadge(ctx, x, y, w, h, page.filmSim);
     } else if (showPlaceholder) {
       drawPlaceholder(ctx, x, y, w, h);
     } else {
@@ -408,6 +494,7 @@ function saveState() {
         textAlign: state.cover.textAlign, titleSize: state.cover.titleSize,
         overlay: state.cover.overlay, overlayColor: state.cover.overlayColor, overlayOpacity: state.cover.overlayOpacity,
         fontColor: state.cover.fontColor, font: state.cover.font,
+        filmSim: state.cover.filmSim || null, showFilmSim: state.cover.showFilmSim || false,
         imgData: serializableImg(state.cover.img),
       },
       back: {
@@ -418,14 +505,16 @@ function saveState() {
         textAlign: state.back.textAlign, titleSize: state.back.titleSize,
         overlay: state.back.overlay, overlayColor: state.back.overlayColor, overlayOpacity: state.back.overlayOpacity,
         fontColor: state.back.fontColor, font: state.back.font,
+        filmSim: state.back.filmSim || null, showFilmSim: state.back.showFilmSim || false,
         imgData: serializableImg(state.back.img),
         qrImgData: serializableImg(state.back.qrImg),
       },
       spreads: state.spreads.map(sp => ({
         fused: sp.fused, fusedPanX: sp.fusedPanX, fusedPanY: sp.fusedPanY, fusedCap: sp.fusedCap, fusedZoom: sp.fusedZoom,
+        fusedFilmSim: sp.fusedFilmSim || null, fusedShowFilmSim: sp.fusedShowFilmSim || false,
         fusedImgData: serializableImg(sp.fusedImg),
-        a: { cap: sp.a.cap, fit: sp.a.fit, panX: sp.a.panX, panY: sp.a.panY, zoom: sp.a.zoom, imgData: serializableImg(sp.a.img) },
-        b: { cap: sp.b.cap, fit: sp.b.fit, panX: sp.b.panX, panY: sp.b.panY, zoom: sp.b.zoom, imgData: serializableImg(sp.b.img) },
+        a: { cap: sp.a.cap, fit: sp.a.fit, panX: sp.a.panX, panY: sp.a.panY, zoom: sp.a.zoom, filmSim: sp.a.filmSim || null, showFilmSim: sp.a.showFilmSim || false, imgData: serializableImg(sp.a.img) },
+        b: { cap: sp.b.cap, fit: sp.b.fit, panX: sp.b.panX, panY: sp.b.panY, zoom: sp.b.zoom, filmSim: sp.b.filmSim || null, showFilmSim: sp.b.showFilmSim || false, imgData: serializableImg(sp.b.img) },
       })),
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(s));
@@ -465,6 +554,7 @@ async function loadSavedState() {
         sp.fused = ss.fused || false;
         sp.fusedPanX = ss.fusedPanX || 0; sp.fusedPanY = ss.fusedPanY || 0;
         sp.fusedCap = ss.fusedCap || ""; sp.fusedZoom = ss.fusedZoom || 1;
+        sp.fusedFilmSim = ss.fusedFilmSim || null; sp.fusedShowFilmSim = ss.fusedShowFilmSim || false;
         sp.fusedImg = await restoreImg(ss.fusedImgData);
         if (ss.a) { Object.assign(sp.a, ss.a); sp.a.img = await restoreImg(ss.a.imgData); }
         if (ss.b) { Object.assign(sp.b, ss.b); sp.b.img = await restoreImg(ss.b.imgData); }
@@ -600,13 +690,22 @@ function renderPreview() {
    ============================================================ */
 async function handleSimpleFile(which, file) {
   let img;
-  try { img = await fileToImage(file); }
+  try { img = await fileToImageWithExif(file); }
   catch(e) { showToast("That file isn't a readable image."); return; }
   state[which].img = img;
-  refreshSimpleSlot(which); renderPreview(); scheduleAutoSave();
+  state[which].filmSim = img._filmSim || null;
+  state[which].showFilmSim = false;
+  refreshSimpleSlot(which);
+  buildCoverControls(which);
+  renderPreview(); scheduleAutoSave();
 }
 function clearSimple(which) {
-  state[which].img = null; refreshSimpleSlot(which); renderPreview(); scheduleAutoSave();
+  state[which].img = null;
+  state[which].filmSim = null;
+  state[which].showFilmSim = false;
+  refreshSimpleSlot(which);
+  buildCoverControls(which);
+  renderPreview(); scheduleAutoSave();
 }
 function refreshSimpleSlot(which) {
   const pageId = which === "cover" ? 1 : 8;
@@ -774,6 +873,18 @@ function makeBgColorControl(stateObj, onChange) {
   return wrap;
 }
 
+function makeFilmSimControl(stateObj, onChange) {
+  const wrap = document.createElement("div"); wrap.className = "ctrl-row";
+  const label = document.createElement("span"); label.className = "ctrl-label";
+  label.textContent = stateObj.filmSim;
+  wrap.appendChild(label);
+  const cb = document.createElement("input"); cb.type = "checkbox"; cb.className = "ctrl-check";
+  cb.checked = !!stateObj.showFilmSim;
+  cb.addEventListener("change", () => { stateObj.showFilmSim = cb.checked; onChange(); });
+  wrap.appendChild(cb);
+  return wrap;
+}
+
 function buildCoverControls(which) {
   const el = document.getElementById(`${which}-controls`);
   if (!el) return;
@@ -786,6 +897,7 @@ function buildCoverControls(which) {
   el.appendChild(makeTitleSize(s, onChange));
   el.appendChild(makeOverlayControls(s, onChange));
   el.appendChild(makeFontControls(s, onChange));
+  if (s.filmSim) el.appendChild(makeFilmSimControl(s, onChange));
 }
 
 /* ============================================================
@@ -856,6 +968,7 @@ function buildSpreadCard(sIdx, pos) {
   clearBtn.textContent = "Clear"; clearBtn.hidden = !hasSpreadContent(sp);
   clearBtn.addEventListener("click", () => {
     sp.fused = false; sp.fusedImg = null; sp.fusedPanX = 0; sp.fusedPanY = 0; sp.fusedCap = ""; sp.fusedZoom = 1;
+    sp.fusedFilmSim = null; sp.fusedShowFilmSim = false;
     sp.a = freshPage(); sp.b = freshPage();
     buildSpreads(); renderPreview(); scheduleAutoSave();
   });
@@ -913,11 +1026,17 @@ function buildFusedStage(card, sp, sIdx, pages) {
     lbl.appendChild(fileInput);
     fileInput.addEventListener("change", async e => {
       const f = e.target.files[0]; if (!f) return;
-      try { sp.fusedImg = await fileToImage(f); } catch(err) { showToast("Not a readable image."); return; }
+      try {
+        sp.fusedImg = await fileToImageWithExif(f);
+        sp.fusedFilmSim = sp.fusedImg._filmSim || null; sp.fusedShowFilmSim = false;
+      } catch(err) { showToast("Not a readable image."); return; }
       buildSpreads(); renderPreview(); scheduleAutoSave();
     });
     addDropZone(uploadRow, async f => {
-      try { sp.fusedImg = await fileToImage(f); } catch(err) { showToast("Not a readable image."); return; }
+      try {
+        sp.fusedImg = await fileToImageWithExif(f);
+        sp.fusedFilmSim = sp.fusedImg._filmSim || null; sp.fusedShowFilmSim = false;
+      } catch(err) { showToast("Not a readable image."); return; }
       buildSpreads(); renderPreview(); scheduleAutoSave();
     });
     uploadRow.appendChild(lbl); card.appendChild(uploadRow);
@@ -928,6 +1047,16 @@ function buildFusedStage(card, sp, sIdx, pages) {
   capInput.placeholder = "Caption (optional)"; capInput.value = sp.fusedCap; capInput.maxLength = 100;
   capInput.addEventListener("input", () => { sp.fusedCap = capInput.value; renderPreview(); scheduleAutoSave(); });
   capRow.appendChild(capInput); card.appendChild(capRow);
+
+  if (sp.fusedFilmSim) {
+    const fsRow = document.createElement("div"); fsRow.className = "ctrl-row";
+    const fsl = document.createElement("span"); fsl.className = "ctrl-label"; fsl.textContent = sp.fusedFilmSim;
+    fsRow.appendChild(fsl);
+    const fsCb = document.createElement("input"); fsCb.type = "checkbox"; fsCb.className = "ctrl-check";
+    fsCb.checked = !!sp.fusedShowFilmSim;
+    fsCb.addEventListener("change", () => { sp.fusedShowFilmSim = fsCb.checked; renderPreview(); scheduleAutoSave(); });
+    fsRow.appendChild(fsCb); card.appendChild(fsRow);
+  }
 }
 
 function addFusedPanOverlay(stage, sp, pages) {
@@ -998,7 +1127,10 @@ function addFusedPanOverlay(stage, sp, pages) {
   overlay.addEventListener("touchcancel", () => { lastPinchDist = null; });
 
   addDropZone(overlay, async f => {
-    try { sp.fusedImg = await fileToImage(f); } catch(err) { showToast("Not a readable image."); return; }
+    try {
+      sp.fusedImg = await fileToImageWithExif(f);
+      sp.fusedFilmSim = sp.fusedImg._filmSim || null; sp.fusedShowFilmSim = false;
+    } catch(err) { showToast("Not a readable image."); return; }
     buildSpreads(); renderPreview(); scheduleAutoSave();
   });
 }
@@ -1035,7 +1167,23 @@ function buildSplitStage(card, sp, sIdx, pages) {
       fitWrap.appendChild(b);
     });
     const col = document.createElement("div"); col.className = "cap-col";
-    col.appendChild(inp); col.appendChild(fitWrap); capRow.appendChild(col);
+    col.appendChild(inp); col.appendChild(fitWrap);
+    if (pg.filmSim) {
+      const fsRow = document.createElement("div"); fsRow.className = "ctrl-row";
+      const fsl = document.createElement("span"); fsl.className = "ctrl-label"; fsl.textContent = pg.filmSim;
+      fsRow.appendChild(fsl);
+      const fsCb = document.createElement("input"); fsCb.type = "checkbox"; fsCb.className = "ctrl-check";
+      fsCb.checked = !!pg.showFilmSim;
+      const pageId = side === "left" ? pages[0] : pages[1];
+      fsCb.addEventListener("change", () => {
+        pg.showFilmSim = fsCb.checked;
+        const c = document.querySelector(`.pg-canvas[data-page-id="${pageId}"]`);
+        if (c) drawToThumb(c, pageId);
+        renderPreview(); scheduleAutoSave();
+      });
+      fsRow.appendChild(fsCb); col.appendChild(fsRow);
+    }
+    capRow.appendChild(col);
   });
   card.appendChild(capRow);
 }
@@ -1080,12 +1228,15 @@ function buildPageDiv(sIdx, side, pageId, pageData, sp, fused) {
   fileInput.addEventListener("change", async e => {
     const f = e.target.files[0]; if (!f) return;
     try {
-      const img = await fileToImage(f);
-      if (fused) { sp.fusedImg = img; buildSpreads(); }
-      else {
-        pageData.img = img;
+      const img = await fileToImageWithExif(f);
+      if (fused) {
+        sp.fusedImg = img; sp.fusedFilmSim = img._filmSim || null; sp.fusedShowFilmSim = false;
+        buildSpreads();
+      } else {
+        pageData.img = img; pageData.filmSim = img._filmSim || null; pageData.showFilmSim = false;
         if (isLandscape(img) && !sp.fused && !sp.fusedImg) {
-          sp.fused = true; sp.fusedImg = img; buildSpreads();
+          sp.fused = true; sp.fusedImg = img; sp.fusedFilmSim = img._filmSim || null; sp.fusedShowFilmSim = false;
+          buildSpreads();
         } else { refresh(); }
       }
     } catch(err) { showToast("Not a readable image."); return; }
@@ -1094,12 +1245,16 @@ function buildPageDiv(sIdx, side, pageId, pageData, sp, fused) {
 
   addDropZone(div, async f => {
     try {
-      const img = await fileToImage(f);
-      if (fused) { sp.fusedImg = img; buildSpreads(); }
-      else {
-        pageData.img = img;
-        if (isLandscape(img) && !sp.fused) { sp.fused = true; sp.fusedImg = img; buildSpreads(); }
-        else { refresh(); }
+      const img = await fileToImageWithExif(f);
+      if (fused) {
+        sp.fusedImg = img; sp.fusedFilmSim = img._filmSim || null; sp.fusedShowFilmSim = false;
+        buildSpreads();
+      } else {
+        pageData.img = img; pageData.filmSim = img._filmSim || null; pageData.showFilmSim = false;
+        if (isLandscape(img) && !sp.fused) {
+          sp.fused = true; sp.fusedImg = img; sp.fusedFilmSim = img._filmSim || null; sp.fusedShowFilmSim = false;
+          buildSpreads();
+        } else { refresh(); }
       }
     } catch(err) { showToast("Not a readable image."); }
     renderPreview(); scheduleAutoSave();
