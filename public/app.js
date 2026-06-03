@@ -8,9 +8,13 @@ const SPREAD_COUNT = 3;
 const LANDSCAPE_RATIO = 1.15;
 const SPREAD_PAGES = [[2,3],[4,5],[6,7]];
 const FONTS = {
-  system: { label: "Sans-serif", css: "-apple-system, Helvetica, Arial, sans-serif" },
-  serif:  { label: "Serif",      css: "Georgia, 'Times New Roman', serif" },
-  mono:   { label: "Mono",       css: "'Courier New', Courier, monospace" },
+  system:   { label: "Sans-serif",       css: "-apple-system, Helvetica, Arial, sans-serif" },
+  serif:    { label: "Serif",            css: "Georgia, 'Times New Roman', serif" },
+  mono:     { label: "Mono",             css: "'Courier New', Courier, monospace" },
+  playfair: { label: "Playfair Display", css: "'Playfair Display', Georgia, serif" },
+  bebas:    { label: "Bebas Neue",       css: "'Bebas Neue', Impact, sans-serif" },
+  lora:     { label: "Lora",             css: "'Lora', Georgia, serif" },
+  space:    { label: "Space Grotesk",    css: "'Space Grotesk', Helvetica, sans-serif" },
 };
 
 let spreadOrder = [0, 1, 2];
