@@ -398,6 +398,19 @@ html, body {
 .confirm-msg { margin: 0; font-size: 15px; color: var(--ink); }
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
+/* ---------- About blurb ---------- */
+.about-blurb {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.about-blurb summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.about-desc { margin: 12px 0 0; font-size: 14px; color: var(--muted); line-height: 1.55; }
+.about-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.about-hashtag { margin: 12px 0 0; font-size: 13px; color: var(--muted); }
+.about-hashtag strong { color: var(--ink); }
+
 /* ---------- How-to ---------- */
 .howto {
   background: var(--panel);
