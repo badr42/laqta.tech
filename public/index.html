@@ -4,24 +4,65 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#111111" />
-  <title>laqta.tech — 8-page printable zine maker</title>
-  <meta name="description" content="Make a free printable 8-page zine from your photos. Everything runs in your browser — your photos never leave your device." />
+  <title>Free Printable Zine Maker — laqta.tech</title>
+  <meta name="description" content="Make a free 8-page printable photo zine. Upload photos, add captions and a QR code, download a print-ready PDF. No signup — everything runs in your browser." />
+  <meta name="author" content="Badr" />
+  <link rel="canonical" href="https://laqta.tech/" />
 
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://laqta.tech/" />
-  <meta property="og:title" content="laqta.tech — 8-page printable zine maker" />
-  <meta property="og:description" content="Make a free printable 8-page zine from your photos. Everything runs in your browser — your photos never leave your device." />
+  <meta property="og:site_name" content="laqta.tech" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:title" content="Free Printable Zine Maker — laqta.tech" />
+  <meta property="og:description" content="Make a free 8-page printable photo zine. Upload photos, add captions and a QR code, download a print-ready PDF. No signup — everything runs in your browser." />
   <meta property="og:image" content="https://laqta.tech/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="laqta.tech — 8-page printable zine maker" />
-  <meta name="twitter:description" content="Make a free printable 8-page zine from your photos. Everything runs in your browser — your photos never leave your device." />
+  <meta name="twitter:title" content="Free Printable Zine Maker — laqta.tech" />
+  <meta name="twitter:description" content="Make a free 8-page printable photo zine. Upload photos, add captions and a QR code, download a print-ready PDF. No signup — everything runs in your browser." />
   <meta name="twitter:image" content="https://laqta.tech/og-image.png" />
+
+  <!-- Icons & manifest -->
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="og-image.png" />
+  <link rel="manifest" href="site.webmanifest" />
+
+  <!-- JSON-LD structured data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "laqta.tech",
+    "url": "https://laqta.tech/",
+    "description": "Free browser-based tool for making a printable 8-page folded photo zine. Export a print-ready PDF — nothing ever leaves your device.",
+    "applicationCategory": "DesignApplication",
+    "operatingSystem": "Any",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "featureList": [
+      "8-page printable zine layout",
+      "Photo upload with pan and zoom",
+      "Fused landscape spreads",
+      "Multiple typography options",
+      "QR code generation",
+      "300 DPI PDF export",
+      "JPG sheet export",
+      "Privacy-first: photos never leave your device",
+      "Auto-save, no account required"
+    ],
+    "author": {
+      "@type": "Person",
+      "name": "Badr"
+    }
+  }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Bebas+Neue&family=Lora:wght@400;700&family=Space+Grotesk:wght@400;700&display=swap" />
@@ -44,7 +85,7 @@
       <span class="brand-name">laqta.tech</span>
     </div>
     <div class="topbar-actions">
-      <a href="https://www.instagram.com/p/DZIXBrrDWNC/?img_index=1" target="_blank" rel="noopener" class="btn btn-ghost"><span class="btn-label">About</span><span class="btn-icon" aria-hidden="true">ℹ</span></a>
+      <a href="https://www.instagram.com/p/DZIXBrrDWNC/?img_index=1" target="_blank" rel="noopener nofollow" class="btn btn-ghost"><span class="btn-label">About</span><span class="btn-icon" aria-hidden="true">ℹ</span></a>
       <label class="paper-select">
         <select id="paperSize">
           <option value="letter">Letter</option>
@@ -58,6 +99,7 @@
   </header>
 
   <main class="layout">
+    <h1 class="visually-hidden">Free 8-Page Printable Zine Maker</h1>
     <section class="editor" aria-label="Zine editor">
 
       <!-- FRONT COVER -->
@@ -142,7 +184,8 @@
 
   <footer class="footer">
     <p>Your photos never leave your device — everything runs in your browser.</p>
-    <p><a href="https://www.instagram.com/p/DZIXBrrDWNC/?img_index=1" target="_blank" rel="noopener" class="footer-link">About this project</a></p>
+    <p>laqta.tech is a free, privacy-first zine maker. "laqta" (لقطة) means "shot" in Arabic. Built by Badr.</p>
+    <p><a href="https://www.instagram.com/p/DZIXBrrDWNC/?img_index=1" target="_blank" rel="noopener nofollow" class="footer-link">About this project</a></p>
   </footer>
   <script data-goatcounter="https://laqtatech.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </body>

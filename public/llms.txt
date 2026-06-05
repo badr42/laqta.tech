@@ -1,0 +1,33 @@
+# laqta.tech
+
+> Free browser-based tool for making a printable 8-page folded zine from your photos. Export a print-ready PDF — nothing ever leaves your device.
+
+## What it is
+
+laqta.tech is a single-page web app for creating 8-page mini zines (folded booklets). Upload photos, add text (title, subtitle, author, captions), and download a print-ready PDF or JPG sheet. Print on one side of a single sheet of paper, fold, and cut to produce a physical booklet.
+
+## Key features
+
+- 8-page layout: front cover, 3 interior photo spreads, back cover
+- Pan and zoom controls for every photo slot
+- Fused landscape spreads: one image spanning both pages of a spread
+- Multiple font choices for cover titles
+- QR code generator on the back cover (paste any URL)
+- Reads Fujifilm EXIF FilmMode to display film simulation labels
+- 300 DPI PDF export in Letter or A4
+- JPG sheet export
+- Auto-saves to localStorage — no account or login required
+- Privacy-first: all image processing runs locally in the browser
+
+## How to fold
+
+Print on one side of a single sheet. Fold long-way (top to bottom), crease, open. Fold short-way twice. Open fully. Fold short-way again and cut the centre slit (middle two panels only). Open the sheet, fold long-way, push ends inward so the cut opens into a + shape; collapse into a booklet.
+
+## Pricing
+
+Free. No signup. No uploads. Anonymous page-view analytics only (GoatCounter).
+
+## About
+
+Built by Badr. "laqta" (لقطة) means "shot" or "capture" in Arabic.
+Project updates: https://www.instagram.com/p/DZIXBrrDWNC/

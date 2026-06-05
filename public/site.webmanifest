@@ -1,0 +1,22 @@
+{
+  "name": "laqta.tech — Printable Zine Maker",
+  "short_name": "laqta.tech",
+  "description": "Make a free printable 8-page zine from your photos. Everything runs in your browser.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "icons": [
+    {
+      "src": "/og-image.png",
+      "sizes": "1200x630",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable any"
+    }
+  ]
+}
