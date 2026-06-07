@@ -15,6 +15,7 @@ const FONTS = {
   bebas:    { label: "Bebas Neue",       css: "'Bebas Neue', Impact, sans-serif" },
   lora:     { label: "Lora",             css: "'Lora', Georgia, serif" },
   space:    { label: "Space Grotesk",    css: "'Space Grotesk', Helvetica, sans-serif" },
+  aref:     { label: "Aref Ruqaa Ink",  css: "'Aref Ruqaa Ink', serif" },
 };
 
 let spreadOrder = [0, 1, 2];
@@ -26,7 +27,7 @@ function freshPage() {
 function freshSpread() {
   return {
     fused: false,
-    fusedImg: null, fusedPanX: 0, fusedPanY: 0, fusedCap: "", fusedZoom: 1,
+    fusedImg: null, fusedPanX: 0, fusedPanY: 0, fusedCap: "", fusedZoom: 1, fusedFit: "cover",
     fusedFilmSim: null, fusedShowFilmSim: false,
     a: freshPage(), b: freshPage(),
   };
@@ -134,15 +135,23 @@ function drawCover(ctx, img, x, y, w, h, fit = "cover", panX = 0, panY = 0, zoom
   ctx.restore();
 }
 
-function drawSpanHalf(ctx, img, x, y, u, v, side, panX = 0, panY = 0, zoom = 1) {
+function drawSpanHalf(ctx, img, x, y, u, v, side, panX = 0, panY = 0, zoom = 1, fit = "cover") {
   const W = 2 * u, H = v;
-  const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight) * zoom;
-  const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-  const ox = Math.max(0, (dw - W) / 2), oy = Math.max(0, (dh - H) / 2);
-  const shift = side === "right" ? -u : 0;
   ctx.save();
   ctx.beginPath(); ctx.rect(x, y, u, v); ctx.clip();
-  ctx.drawImage(img, x + (W - dw) / 2 + shift + panX * ox, y + (H - dh) / 2 + panY * oy, dw, dh);
+  if (fit === "contain") {
+    ctx.fillStyle = "#111111"; ctx.fillRect(x, y, u, v);
+    const scale = Math.min(W / img.naturalWidth, H / img.naturalHeight) * zoom;
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+    const shift = side === "right" ? -u : 0;
+    ctx.drawImage(img, x + (W - dw) / 2 + shift, y + (H - dh) / 2, dw, dh);
+  } else {
+    const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight) * zoom;
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+    const ox = Math.max(0, (dw - W) / 2), oy = Math.max(0, (dh - H) / 2);
+    const shift = side === "right" ? -u : 0;
+    ctx.drawImage(img, x + (W - dw) / 2 + shift + panX * ox, y + (H - dh) / 2 + panY * oy, dw, dh);
+  }
   ctx.restore();
 }
 
@@ -364,7 +373,7 @@ function renderPage(ctx, x, y, w, h, pageId, showPlaceholder = false) {
   }
   const sp = m.spread;
   if (sp.fused && sp.fusedImg) {
-    drawSpanHalf(ctx, sp.fusedImg, x, y, w, h, m.side, sp.fusedPanX, sp.fusedPanY, sp.fusedZoom || 1);
+    drawSpanHalf(ctx, sp.fusedImg, x, y, w, h, m.side, sp.fusedPanX, sp.fusedPanY, sp.fusedZoom || 1, sp.fusedFit || "cover");
     if (m.side === "right") {
       caption(ctx, sp.fusedCap, x, y, w, h);
     }
@@ -456,7 +465,7 @@ function saveState() {
         qrImgData: serializableImg(state.back.qrImg),
       },
       spreads: state.spreads.map(sp => ({
-        fused: sp.fused, fusedPanX: sp.fusedPanX, fusedPanY: sp.fusedPanY, fusedCap: sp.fusedCap, fusedZoom: sp.fusedZoom,
+        fused: sp.fused, fusedPanX: sp.fusedPanX, fusedPanY: sp.fusedPanY, fusedCap: sp.fusedCap, fusedZoom: sp.fusedZoom, fusedFit: sp.fusedFit,
         fusedFilmSim: sp.fusedFilmSim || null, fusedShowFilmSim: sp.fusedShowFilmSim || false,
         fusedImgData: serializableImg(sp.fusedImg),
         a: { cap: sp.a.cap, fit: sp.a.fit, panX: sp.a.panX, panY: sp.a.panY, zoom: sp.a.zoom, filmSim: sp.a.filmSim || null, showFilmSim: sp.a.showFilmSim || false, imgData: serializableImg(sp.a.img) },
@@ -499,7 +508,7 @@ async function loadSavedState() {
         const ss = s.spreads[i], sp = state.spreads[i];
         sp.fused = ss.fused || false;
         sp.fusedPanX = ss.fusedPanX || 0; sp.fusedPanY = ss.fusedPanY || 0;
-        sp.fusedCap = ss.fusedCap || ""; sp.fusedZoom = ss.fusedZoom || 1;
+        sp.fusedCap = ss.fusedCap || ""; sp.fusedZoom = ss.fusedZoom || 1; sp.fusedFit = ss.fusedFit || "cover";
         sp.fusedFilmSim = ss.fusedFilmSim || null; sp.fusedShowFilmSim = ss.fusedShowFilmSim || false;
         sp.fusedImg = await restoreImg(ss.fusedImgData);
         if (ss.a) { Object.assign(sp.a, ss.a); sp.a.img = await restoreImg(ss.a.imgData); }
@@ -894,7 +903,7 @@ function buildSpreadCard(sIdx, pos) {
   const clearBtn = document.createElement("button"); clearBtn.type = "button"; clearBtn.className = "spread-clear";
   clearBtn.textContent = "Clear"; clearBtn.hidden = !hasSpreadContent(sp);
   clearBtn.addEventListener("click", () => {
-    sp.fused = false; sp.fusedImg = null; sp.fusedPanX = 0; sp.fusedPanY = 0; sp.fusedCap = ""; sp.fusedZoom = 1;
+    sp.fused = false; sp.fusedImg = null; sp.fusedPanX = 0; sp.fusedPanY = 0; sp.fusedCap = ""; sp.fusedZoom = 1; sp.fusedFit = "cover";
     sp.fusedFilmSim = null; sp.fusedShowFilmSim = false;
     sp.a = freshPage(); sp.b = freshPage();
     buildSpreads(); renderPreview(); scheduleAutoSave();
@@ -932,7 +941,7 @@ function buildFusedStage(card, sp, sIdx, pages) {
     delBtn.type = "button"; delBtn.className = "page-delete-btn"; delBtn.textContent = "×";
     delBtn.addEventListener("click", e => {
       e.stopPropagation();
-      sp.fusedImg = null; sp.fusedPanX = 0; sp.fusedPanY = 0; sp.fusedZoom = 1;
+      sp.fusedImg = null; sp.fusedPanX = 0; sp.fusedPanY = 0; sp.fusedZoom = 1; sp.fusedFit = "cover";
       buildSpreads(); renderPreview(); scheduleAutoSave();
     });
     stage.appendChild(delBtn);
@@ -944,6 +953,27 @@ function buildFusedStage(card, sp, sIdx, pages) {
   const hintSpan = document.createElement("span"); hintSpan.className = "spread-hint";
   hintSpan.textContent = sp.fusedImg ? "Drag or scroll to pan and zoom across spread" : "Upload an image to span both pages";
   hint.appendChild(hintSpan);
+
+  if (sp.fusedImg) {
+    const fitWrap = document.createElement("div"); fitWrap.className = "page-fit-row";
+    ["cover", "contain"].forEach(val => {
+      const b = document.createElement("button"); b.type = "button";
+      b.className = "seg-btn sm" + ((sp.fusedFit || "cover") === val ? " active" : "");
+      b.textContent = val === "cover" ? "Fill" : "Fit";
+      b.addEventListener("click", () => {
+        sp.fusedFit = val;
+        fitWrap.querySelectorAll(".seg-btn").forEach((btn, i) => btn.classList.toggle("active", ["cover", "contain"][i] === val));
+        renderPreview(); scheduleAutoSave();
+        const lc = card.querySelector('[data-side="left"] .pg-canvas');
+        const rc = card.querySelector('[data-side="right"] .pg-canvas');
+        if (lc) drawToThumb(lc, pages[0]);
+        if (rc) drawToThumb(rc, pages[1]);
+      });
+      fitWrap.appendChild(b);
+    });
+    hint.appendChild(fitWrap);
+  }
+
   card.appendChild(hint);
 
   if (!sp.fusedImg) {
@@ -1260,6 +1290,7 @@ function generatePDF() {
       doc.addImage(sheet.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, p.w, p.h);
       const name = (state.cover.title || "zine").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g,"") || "zine";
       doc.save(`${name}.pdf`);
+      window.goatcounter?.count({ path: "download-pdf", title: "Download PDF", event: true });
       showToast("PDF downloaded — print at 100%, single-sided.");
     } catch(e) { console.error(e); showToast("Something went wrong building the PDF."); }
     finally { btn.disabled = false; btn.textContent = "Download PDF"; }
@@ -1276,6 +1307,7 @@ function generateJPG() {
       const name = (state.cover.title || "zine").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g,"") || "zine";
       a.href = sheet.toDataURL("image/jpeg", 0.92);
       a.download = `${name}.jpg`; a.click();
+      window.goatcounter?.count({ path: "download-jpg", title: "Download JPG", event: true });
       showToast("JPG downloaded.");
     } catch(e) { showToast("Something went wrong."); }
     finally { btn.disabled = false; btn.textContent = "Save JPG"; }
